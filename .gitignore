@@ -158,6 +158,9 @@ dist
 .yarn/install-state.gz
 .pnp.\*
 
+# Local implementation worktrees
+.worktrees/
+
 # wrangler project
 
 .dev.vars*
