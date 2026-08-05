@@ -27,6 +27,16 @@ import { generateRecoveryCodes, hashRecoveryCode, generateTotpSecret, verifyTotp
 import { encryptTotpSecret, decryptTotpSecret } from './totp-secret';
 import { ensureApplicationSchema } from './schema';
 import { createBrandedManifest, getAppBranding, rewriteBrandedHtml } from './branding';
+import {
+	AttachmentError,
+	createAttachment,
+	detachAttachment,
+	getAttachment,
+	listAttachments,
+	scheduleDetachedObjectDeletion,
+	scheduleStaleAttachmentCleanup,
+	validateAttachmentIds,
+} from './attachments';
 
 type AppEnv = Omit<Env, 'APP_NAME' | 'APP_SHORT_NAME' | 'APP_DESCRIPTION'> & {
 	APP_PASSWORD?: string;
@@ -237,6 +247,18 @@ function requireNoteId(value: unknown, field = 'id') {
 		throw new ApiError(400, 'invalid_id', `${field} must be a UUID`);
 	}
 	return value.toLowerCase();
+}
+
+function parseAttachmentIds(value: unknown) {
+	if (value === undefined) return [] as string[];
+	if (!Array.isArray(value) || value.length > 100) {
+		throw new ApiError(400, 'invalid_attachment_ids', 'attachmentIds must be an array of UUIDs');
+	}
+	const ids = value.map((item) => requireNoteId(item, 'attachmentId'));
+	if (new Set(ids).size !== ids.length) {
+		throw new ApiError(400, 'invalid_attachment_ids', 'attachmentIds must not contain duplicates');
+	}
+	return ids;
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -495,7 +517,7 @@ async function initializeVaultKeyCheck(env: AppEnv, vaultId: string, candidate: 
 	return row.value;
 }
 
-async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
+async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
 	const url = new URL(request.url);
 	const branding = getAppBranding(env);
 	const brandedPage = BRANDED_HTML_PATHS.get(url.pathname);
@@ -716,6 +738,40 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 		await touchSessionActivity(env, session!.sessionId!);
 	}
 	const vaultId = session?.vaultId || 'default';
+	if (url.pathname.startsWith('/api/attachments')) scheduleStaleAttachmentCleanup(env, ctx);
+
+	if (url.pathname === '/api/attachments' && request.method === 'POST') {
+		const noteIdHeader = request.headers.get('x-note-id');
+		if (!noteIdHeader) throw new ApiError(400, 'invalid_id', 'x-note-id must be a UUID');
+		const attachment = await createAttachment(env, ctx, vaultId, requireNoteId(noteIdHeader, 'noteId'), request);
+		return json({ ok: true, attachment }, 201);
+	}
+
+	if (url.pathname === '/api/attachments' && request.method === 'GET') {
+		const noteId = url.searchParams.get('noteId');
+		if (!noteId) throw new ApiError(400, 'invalid_id', 'noteId must be a UUID');
+		const attachments = await listAttachments(env, vaultId, requireNoteId(noteId, 'noteId'));
+		return json({ ok: true, attachments });
+	}
+
+	const attachmentMatch = /^\/api\/attachments\/([^/]+)$/.exec(url.pathname);
+	if (attachmentMatch) {
+		let attachmentId: string;
+		try {
+			attachmentId = requireNoteId(decodeURIComponent(attachmentMatch[1]), 'attachmentId');
+		} catch (error) {
+			if (error instanceof ApiError) throw error;
+			throw new ApiError(400, 'invalid_id', 'attachmentId must be a UUID');
+		}
+		if (request.method === 'GET') {
+			const response = await getAttachment(env, vaultId, attachmentId);
+			return response ?? json({ ok: false, error: 'not_found' }, 404);
+		}
+		if (request.method === 'DELETE') {
+			const detached = await detachAttachment(env, ctx, vaultId, attachmentId);
+			return detached ? json({ ok: true }) : json({ ok: false, error: 'not_found' }, 404);
+		}
+	}
 
 	if (url.pathname === '/api/shares' && request.method === 'POST') {
 		const body = await readJsonObject(request, MAX_SHARE_BODY_BYTES);
@@ -772,6 +828,8 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 		const title = requireEncryptedValue(body.title, 'title', MAX_ENCRYPTED_TITLE_LENGTH);
 		const content = requireEncryptedValue(body.content, 'content', MAX_ENCRYPTED_CONTENT_LENGTH);
 		const id = body.id === undefined ? crypto.randomUUID() : requireNoteId(body.id);
+		const attachmentIds = parseAttachmentIds(body.attachmentIds);
+		if (attachmentIds.length > 0) await validateAttachmentIds(env, vaultId, id, attachmentIds);
 		const now = Date.now();
 
 		const note = await env.DB.prepare(
@@ -783,6 +841,15 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 			.bind(id, vaultId, title, content, now, now)
 			.first<Note>();
 		if (!note) return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
+		if (attachmentIds.length > 0) {
+			await env.DB.batch([
+				env.DB.prepare(
+					`UPDATE note_attachments
+					 SET status = 'attached', attached_at = COALESCE(attached_at, ?), detached_at = NULL
+					 WHERE vault_id = ? AND note_id = ? AND id IN (${attachmentIds.map(() => '?').join(', ')})`
+				).bind(now, vaultId, id, ...attachmentIds),
+			]);
+		}
 		return json({ ok: true, note }, 201);
 	}
 
@@ -805,23 +872,52 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 			const body = await readJsonObject(request, MAX_NOTE_BODY_BYTES);
 			const title = requireEncryptedValue(body.title, 'title', MAX_ENCRYPTED_TITLE_LENGTH);
 			const content = requireEncryptedValue(body.content, 'content', MAX_ENCRYPTED_CONTENT_LENGTH);
+			const attachmentIds = parseAttachmentIds(body.attachmentIds);
+			if (attachmentIds.length > 0) await validateAttachmentIds(env, vaultId, id, attachmentIds);
 			if (!Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
 				throw new ApiError(428, 'revision_required', 'a positive revision is required');
 			}
 
 			const now = Date.now();
-			const note = await env.DB.prepare(
+			const nextRevision = now > Number(body.revision) ? now : Number(body.revision) + 1;
+			const statements = [
+				env.DB.prepare(
 				`UPDATE notes
 				 SET title = ?,
 				     content = ?,
 				     updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
 				 WHERE id = ? AND vault_id = ? AND updated_at = ?
 				 RETURNING id, title, content, created_at, updated_at, updated_at AS revision`
-			)
-				.bind(title, content, now, now, id, vaultId, body.revision)
-				.first<Note>();
+				).bind(title, content, now, now, id, vaultId, body.revision),
+			];
+			if (body.attachmentIds !== undefined) {
+				const omittedCondition = attachmentIds.length > 0 ? `AND id NOT IN (${attachmentIds.map(() => '?').join(', ')})` : '';
+				statements.push(
+					env.DB.prepare(
+						`UPDATE note_attachments
+						 SET status = 'detached', detached_at = ?
+						 WHERE vault_id = ? AND note_id = ? AND status = 'attached' ${omittedCondition}
+						   AND EXISTS (SELECT 1 FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ?)`
+					).bind(now, vaultId, id, ...attachmentIds, id, vaultId, nextRevision),
+				);
+				if (attachmentIds.length > 0) {
+					statements.push(
+						env.DB.prepare(
+							`UPDATE note_attachments
+							 SET status = 'attached', attached_at = COALESCE(attached_at, ?), detached_at = NULL
+							 WHERE vault_id = ? AND note_id = ? AND id IN (${attachmentIds.map(() => '?').join(', ')})
+							   AND EXISTS (SELECT 1 FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ?)`
+						).bind(now, vaultId, id, ...attachmentIds, id, vaultId, nextRevision),
+					);
+				}
+			}
+			const batchResult = await env.DB.batch(statements);
+			const note = (batchResult[0]?.results?.[0] as Note | undefined) ?? null;
 
-			if (note) return json({ ok: true, note });
+			if (note) {
+				if (body.attachmentIds !== undefined) scheduleDetachedObjectDeletion(env, ctx, vaultId);
+				return json({ ok: true, note });
+			}
 			const existing = await getNote(env, id, vaultId);
 			if (!existing) return json({ ok: false, error: 'not_found' }, 404);
 			return json(
@@ -839,11 +935,18 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 			if (!Number.isSafeInteger(revision)) {
 				throw new ApiError(428, 'revision_required', 'If-Match must contain the current positive revision');
 			}
-			const deleted = await env.DB.prepare(
-				'DELETE FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ? RETURNING id'
-			)
-				.bind(id, vaultId, revision)
-				.first<{ id: string }>();
+			const deletionBatch = await env.DB.batch([
+				env.DB.prepare(
+					`UPDATE note_attachments
+					 SET status = 'detached', detached_at = ?
+					 WHERE vault_id = ? AND note_id = ? AND status IN ('pending', 'attached')
+					   AND EXISTS (SELECT 1 FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ?)`
+				).bind(Date.now(), vaultId, id, id, vaultId, revision),
+				env.DB.prepare(
+					'DELETE FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ? RETURNING id'
+				).bind(id, vaultId, revision),
+			]);
+			const deleted = (deletionBatch[1]?.results?.[0] as { id: string } | undefined) ?? null;
 			if (!deleted) {
 				const existing = await getNote(env, id, vaultId);
 				if (!existing) return json({ ok: false, error: 'not_found' }, 404);
@@ -852,6 +955,7 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 					409
 				);
 			}
+			scheduleDetachedObjectDeletion(env, ctx, vaultId);
 			return json({ ok: true });
 		}
 	}
@@ -860,12 +964,19 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 }
 
 export default {
-	async fetch(request: Request, env: AppEnv): Promise<Response> {
+	async fetch(request: Request, env: AppEnv, ctx?: ExecutionContext): Promise<Response> {
 		const requestId = getRequestId(request);
+		const executionContext = ctx ?? ({ waitUntil() {} } as unknown as ExecutionContext);
 		try {
-			return withCommonHeaders(await handleRequest(request, env), requestId);
+			return withCommonHeaders(await handleRequest(request, env, executionContext), requestId);
 		} catch (error) {
 			if (error instanceof ApiError) {
+				return withCommonHeaders(
+					json({ ok: false, error: error.message, code: error.code }, error.status),
+					requestId
+				);
+			}
+			if (error instanceof AttachmentError) {
 				return withCommonHeaders(
 					json({ ok: false, error: error.message, code: error.code }, error.status),
 					requestId
