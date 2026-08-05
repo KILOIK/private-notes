@@ -38,6 +38,12 @@
 			"migrations_table": "d1_migrations","database_id": "65617025-69bb-4683-a992-2c6d467d7cf4"
 		}
 	],
+	"r2_buckets": [
+		{
+			"binding": "ATTACHMENTS",
+			"bucket_name": "private-notes-attachments"
+		}
+	],
 	"observability": {
 		"enabled": true
 	},

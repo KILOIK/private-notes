@@ -77,6 +77,9 @@ beforeEach(async () => {
 	await env.DB.batch([
 		env.DB.prepare('DELETE FROM notes'),
 		env.DB.prepare('DELETE FROM note_shares'),
+		env.DB.prepare('DELETE FROM note_attachments'),
+		env.DB.prepare('DELETE FROM auth_recovery_codes'),
+		env.DB.prepare('DELETE FROM auth_sessions'),
 		env.DB.prepare('DELETE FROM app_meta'),
 		env.DB.prepare('DELETE FROM auth_rate_limits'),
 	]);
@@ -300,6 +303,9 @@ describe('private-notes worker', () => {
 
 	it('bootstraps only a completely empty D1 database for one-click deployment', async () => {
 		await env.DB.batch([
+			env.DB.prepare('DROP TABLE IF EXISTS auth_sessions'),
+			env.DB.prepare('DROP TABLE IF EXISTS auth_recovery_codes'),
+			env.DB.prepare('DROP TABLE IF EXISTS note_attachments'),
 			env.DB.prepare('DROP TABLE IF EXISTS note_shares'),
 			env.DB.prepare('DROP TABLE IF EXISTS notes'),
 			env.DB.prepare('DROP TABLE IF EXISTS app_meta'),
@@ -319,10 +325,12 @@ describe('private-notes worker', () => {
 		const tables = await env.DB.prepare(
 			`SELECT name FROM sqlite_master
 			 WHERE type = 'table'
-			   AND name IN ('app_meta', 'auth_rate_limits', 'd1_migrations', 'note_shares', 'notes')`
+			 AND name IN ('app_meta', 'auth_rate_limits', 'auth_recovery_codes',
+				'auth_sessions', 'd1_migrations', 'note_attachments', 'note_shares', 'notes')`
 		).all<{ name: string }>();
 		expect(new Set((tables.results ?? []).map((row) => row.name))).toEqual(
-			new Set(['app_meta', 'auth_rate_limits', 'd1_migrations', 'note_shares', 'notes'])
+			new Set(['app_meta', 'auth_rate_limits', 'auth_recovery_codes',
+				'auth_sessions', 'd1_migrations', 'note_attachments', 'note_shares', 'notes'])
 		);
 		const journal = await env.DB.prepare('SELECT name FROM d1_migrations ORDER BY id').all<{ name: string }>();
 		expect((journal.results ?? []).map((row) => row.name)).toEqual([
@@ -333,6 +341,8 @@ describe('private-notes worker', () => {
 			'0005_note_vaults.sql',
 			'0006_hardening.sql',
 			'0007_one_time_shares.sql',
+			'0008_attachments.sql',
+			'0009_totp_sessions.sql',
 		]);
 		const noteColumns = await env.DB.prepare('PRAGMA table_info(notes)').all<{ name: string }>();
 		expect((noteColumns.results ?? []).map((column) => column.name)).toEqual([
@@ -353,6 +363,9 @@ describe('private-notes worker', () => {
 
 	it('never bootstraps an unrelated or partially initialized database', async () => {
 		await env.DB.batch([
+			env.DB.prepare('DROP TABLE IF EXISTS auth_sessions'),
+			env.DB.prepare('DROP TABLE IF EXISTS auth_recovery_codes'),
+			env.DB.prepare('DROP TABLE IF EXISTS note_attachments'),
 			env.DB.prepare('DROP TABLE IF EXISTS note_shares'),
 			env.DB.prepare('DROP TABLE IF EXISTS notes'),
 			env.DB.prepare('DROP TABLE IF EXISTS app_meta'),

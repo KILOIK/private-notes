@@ -2,7 +2,16 @@ type SchemaEnv = {
 	DB: D1Database;
 };
 
-const APPLICATION_TABLE_NAMES = ['app_meta', 'auth_rate_limits', 'd1_migrations', 'note_shares', 'notes'] as const;
+const APPLICATION_TABLE_NAMES = [
+	'app_meta',
+	'auth_rate_limits',
+	'auth_recovery_codes',
+	'auth_sessions',
+	'd1_migrations',
+	'note_attachments',
+	'note_shares',
+	'notes',
+] as const;
 const APPLIED_MIGRATIONS = [
 	'0001_init.sql',
 	'0002_notes_fts.sql',
@@ -11,6 +20,8 @@ const APPLIED_MIGRATIONS = [
 	'0005_note_vaults.sql',
 	'0006_hardening.sql',
 	'0007_one_time_shares.sql',
+	'0008_attachments.sql',
+	'0009_totp_sessions.sql',
 ] as const;
 
 const schemaChecks = new WeakMap<object, Promise<void>>();
@@ -93,6 +104,60 @@ async function initializeFreshDatabase(db: D1Database) {
 		db.prepare(
 			`CREATE INDEX IF NOT EXISTS idx_note_shares_expires_at
 			 ON note_shares(expires_at)`
+		),
+		db.prepare(
+			`CREATE TABLE IF NOT EXISTS note_attachments (
+			 id TEXT PRIMARY KEY,
+			 vault_id TEXT NOT NULL,
+			 note_id TEXT NOT NULL,
+			 object_key TEXT NOT NULL,
+			 mime_type TEXT NOT NULL,
+			 byte_length INTEGER NOT NULL,
+			 width INTEGER,
+			 height INTEGER,
+			 status TEXT NOT NULL CHECK (status IN ('pending', 'attached', 'detached')),
+			 created_at INTEGER NOT NULL,
+			 attached_at INTEGER,
+			 detached_at INTEGER
+			)`
+		),
+		db.prepare(
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_note_attachments_vault_object_key
+			 ON note_attachments(vault_id, object_key)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_note_attachments_vault_note_status
+			 ON note_attachments(vault_id, note_id, status)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_note_attachments_status_created_at
+			 ON note_attachments(status, created_at)`
+		),
+		db.prepare(
+			`CREATE TABLE IF NOT EXISTS auth_recovery_codes (
+			 code_hash TEXT PRIMARY KEY,
+			 created_at INTEGER NOT NULL,
+			 consumed_at INTEGER
+			)`
+		),
+		db.prepare(
+			`CREATE TABLE IF NOT EXISTS auth_sessions (
+			 id_hash TEXT PRIMARY KEY,
+			 vault_id TEXT NOT NULL,
+			 created_at INTEGER NOT NULL,
+			 last_activity_at INTEGER NOT NULL,
+			 last_reauth_at INTEGER NOT NULL,
+			 expires_at INTEGER NOT NULL,
+			 revoked_at INTEGER
+			)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_auth_sessions_vault_activity
+			 ON auth_sessions(vault_id, last_activity_at)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at
+			 ON auth_sessions(expires_at)`
 		),
 		db.prepare(
 			`CREATE TABLE IF NOT EXISTS d1_migrations (

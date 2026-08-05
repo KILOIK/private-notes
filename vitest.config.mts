@@ -15,6 +15,9 @@ export default defineConfig(async () => {
 			cloudflareTest({
 				wrangler: { configPath: './wrangler.jsonc' },
 				miniflare: {
+					r2Buckets: {
+						ATTACHMENTS: 'private-notes-attachments',
+					},
 					bindings: {
 						APP_PASSWORD: 'test-default-password-with-strong-entropy',
 						APP_PASSWORDS: 'guest=test-guest-password-with-strong-entropy',
