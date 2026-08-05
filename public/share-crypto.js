@@ -1,5 +1,7 @@
 const SHARE_AAD = new TextEncoder().encode('private-notes-share:v1');
 const SHARE_PROOF_CONTEXT = new TextEncoder().encode('private-notes-share-proof:v1');
+const SHARE_NOTE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHARE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
 /** @param {Uint8Array} bytes */
 function bytesToBase64(bytes) {
@@ -98,6 +100,39 @@ function parseCiphertext(value) {
   return { iv: iv, data: data };
 }
 
+/** @param {unknown} value */
+function validateSharedPayload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid share payload');
+  const payload = /** @type {Record<string, unknown>} */ (value);
+  if (
+    payload.v !== 1 ||
+    typeof payload.title !== 'string' ||
+    typeof payload.content !== 'string' ||
+    !Number.isSafeInteger(payload.createdAt) ||
+    !Number.isSafeInteger(payload.sharedAt)
+  ) {
+    throw new Error('invalid share payload');
+  }
+  if (payload.attachments === undefined) return value;
+  if (!Array.isArray(payload.attachments) || payload.attachments.length > 100) throw new Error('invalid share attachments');
+  for (const item of payload.attachments) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('invalid share attachment');
+    const attachment = /** @type {Record<string, unknown>} */ (item);
+    if (
+      typeof attachment.id !== 'string' ||
+      !SHARE_NOTE_ID_PATTERN.test(attachment.id) ||
+      typeof attachment.mimeType !== 'string' ||
+      !SHARE_IMAGE_TYPES.has(attachment.mimeType.toLowerCase()) ||
+      typeof attachment.ciphertext !== 'string' ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(attachment.ciphertext) ||
+      attachment.ciphertext.length < 4
+    ) {
+      throw new Error('invalid share attachment');
+    }
+  }
+  return value;
+}
+
 /** @param {string} ciphertext @param {Uint8Array} keyBytes @returns {Promise<unknown>} */
 export async function decryptSharedPayload(ciphertext, keyBytes) {
   const envelope = parseCiphertext(ciphertext);
@@ -115,7 +150,7 @@ export async function decryptSharedPayload(ciphertext, keyBytes) {
   );
   const bytes = new Uint8Array(plain);
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return validateSharedPayload(JSON.parse(new TextDecoder().decode(bytes)));
   } finally {
     bytes.fill(0);
   }

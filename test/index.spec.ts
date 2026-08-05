@@ -179,6 +179,30 @@ describe('private-notes worker', () => {
 		keyBytes.fill(0);
 	});
 
+	it('round trips encrypted attachment entries while preserving text-only shares', async () => {
+		const payload = {
+			v: 1,
+			title: 'with image',
+			content: '![image](attachment://11111111-1111-4111-8111-111111111111)',
+			createdAt: Date.now() - 1000,
+			sharedAt: Date.now(),
+			attachments: [{
+				id: '11111111-1111-4111-8111-111111111111',
+				mimeType: 'image/png',
+				ciphertext: 'AQIDBA==',
+			}],
+		};
+		const encrypted = await encryptSharedPayload(payload);
+		const keyBytes = parseShareKeyFragment(encrypted.keyFragment);
+		await expect(decryptSharedPayload(encrypted.ciphertext, keyBytes)).resolves.toEqual(payload);
+		keyBytes.fill(0);
+
+		const malformed = await encryptSharedPayload({ ...payload, attachments: [{ id: 'bad' }] });
+		const malformedKey = parseShareKeyFragment(malformed.keyFragment);
+		await expect(decryptSharedPayload(malformed.ciphertext, malformedKey)).rejects.toThrow();
+		malformedKey.fill(0);
+	});
+
 	it('fails closed when the required vault password is missing or unsafe', async () => {
 		const missingSecrets = { DB: env.DB } as unknown as Parameters<typeof worker.fetch>[1];
 		const response = await worker.fetch(new Request(`${ORIGIN}/api/session`), missingSecrets);
