@@ -10,10 +10,21 @@ import {
 	getLoginRateLimit,
 	getSession,
 	getVaultIdForPassword,
+	getCredentialFingerprintForVault,
+	isTotpEnabled,
+	createPendingTwoFactorChallenge,
+	verifyTwoFactorChallenge,
+	verifyTotpOrRecoveryCode,
+	requireActiveSession,
+	TOTP_ENABLED_META_KEY,
+	TOTP_SECRET_META_KEY,
+	TOTP_PENDING_META_KEY,
 	recordFailedLogin,
 	resolveCookieSecret,
 	tooManyLoginAttempts,
 } from './auth';
+import { generateRecoveryCodes, hashRecoveryCode, generateTotpSecret, verifyTotpCode } from './totp';
+import { encryptTotpSecret, decryptTotpSecret } from './totp-secret';
 import { ensureApplicationSchema } from './schema';
 import { createBrandedManifest, getAppBranding, rewriteBrandedHtml } from './branding';
 
@@ -519,7 +530,7 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 
 	if (url.pathname === '/api/session' && request.method === 'GET') {
 		const session = await getSession(request, env);
-		return json({ ok: true, authenticated: session.authenticated, vaultId: session.vaultId });
+		return json({ ok: true, authenticated: session.authenticated, vaultId: session.vaultId, reauthRequired: session.reauthRequired });
 	}
 
 	if (url.pathname === '/api/login' && request.method === 'POST') {
@@ -540,6 +551,11 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 
 		await clearFailedLogins(env, rateLimit.key);
 		await cleanupOldLoginRateLimits(env);
+		if (await isTotpEnabled(env)) {
+			const fingerprint = await getCredentialFingerprintForVault(env, vaultId);
+			const challengeId = await createPendingTwoFactorChallenge(env, vaultId, fingerprint);
+			return json({ ok: false, code: 'two_factor_required', challengeId }, 202);
+		}
 		const token = await createSessionToken(env, vaultId);
 		if (!token) throw new Error('failed to create session token');
 
@@ -552,7 +568,122 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 		);
 	}
 
+	if (url.pathname === '/api/login/totp' && request.method === 'POST') {
+		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
+		if (typeof body.challengeId !== 'string' || typeof body.code !== 'string' || !body.code.trim()) {
+			return unauthorized();
+		}
+		const rateLimit = await getLoginRateLimit(request, env);
+		if (rateLimit.limited) return tooManyLoginAttempts(rateLimit.retryAfterSeconds);
+		const session = await verifyTwoFactorChallenge(env, body.challengeId, body.code.trim());
+		if (!session) {
+			const failure = await recordFailedLogin(env, rateLimit.key);
+			if (failure.locked) return tooManyLoginAttempts(failure.retryAfterSeconds);
+			return unauthorized();
+		}
+		await clearFailedLogins(env, rateLimit.key);
+		const token = await createSessionToken(env, session.vaultId, session.sessionId || undefined);
+		return json(
+			{ ok: true, vaultId: session.vaultId },
+			200,
+			{ 'set-cookie': `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}` }
+		);
+	}
+
+	if (url.pathname === '/api/auth/totp/enroll' && request.method === 'POST') {
+		const session = await requireActiveSession(request, env, { touch: true });
+		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
+		if (typeof body.password !== 'string' || (await getVaultIdForPassword(env, body.password)) !== session.vaultId) return unauthorized();
+		if (await isTotpEnabled(env)) return json({ ok: false, error: 'already_enabled' }, 409);
+		const existing = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1').bind(TOTP_PENDING_META_KEY).first<{ value: string }>();
+		if (existing) return json({ ok: false, error: 'enrollment_pending' }, 409);
+		const secret = generateTotpSecret();
+		const encrypted = await encryptTotpSecret(secret, env.COOKIE_SECRET!);
+		await env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+			.bind(TOTP_PENDING_META_KEY, JSON.stringify({ encrypted, createdAt: Date.now(), vaultId: session.vaultId })).run();
+		const label = encodeURIComponent('Private Notes');
+		return json({ ok: true, secret, otpauthUri: `otpauth://totp/${label}?secret=${secret}&issuer=Private%20Notes` });
+	}
+
+	if (url.pathname === '/api/auth/totp/confirm' && request.method === 'POST') {
+		const session = await requireActiveSession(request, env, { touch: true });
+		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
+		const rateLimit = await getLoginRateLimit(request, env);
+		if (rateLimit.limited) return tooManyLoginAttempts(rateLimit.retryAfterSeconds);
+		if (typeof body.code !== 'string') return unauthorized();
+		const pending = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1').bind(TOTP_PENDING_META_KEY).first<{ value: string }>();
+		if (!pending) return unauthorized();
+		let data: { encrypted?: string; createdAt?: number; vaultId?: string };
+		try { data = JSON.parse(pending.value) as typeof data; } catch { return unauthorized(); }
+		if (!data.encrypted || !data.createdAt || data.vaultId !== session.vaultId || Date.now() - data.createdAt > 10 * 60 * 1000) return unauthorized();
+		let secret: string;
+		try { secret = await decryptTotpSecret(data.encrypted, env.COOKIE_SECRET!); } catch { return unauthorized(); }
+		if (!(await verifyTotpCode(secret, body.code, Date.now(), 1)).valid) {
+			const failure = await recordFailedLogin(env, rateLimit.key);
+			if (failure.locked) return tooManyLoginAttempts(failure.retryAfterSeconds);
+			return unauthorized();
+		}
+		await clearFailedLogins(env, rateLimit.key);
+		const recoveryCodes = generateRecoveryCodes(10);
+		const statements = [
+			env.DB.prepare('DELETE FROM auth_recovery_codes'),
+			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(TOTP_ENABLED_META_KEY, '1'),
+			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(TOTP_SECRET_META_KEY, data.encrypted),
+			env.DB.prepare('DELETE FROM app_meta WHERE key = ?').bind(TOTP_PENDING_META_KEY),
+		];
+		for (const code of recoveryCodes) statements.push(env.DB.prepare('INSERT INTO auth_recovery_codes (code_hash, created_at, consumed_at) VALUES (?, ?, NULL)').bind(await hashRecoveryCode(code), Date.now()));
+		await env.DB.batch(statements);
+		return json({ ok: true, recoveryCodes });
+	}
+
+	if (url.pathname === '/api/auth/totp/disable' && request.method === 'POST') {
+		const session = await requireActiveSession(request, env, { touch: true });
+		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
+		const rateLimit = await getLoginRateLimit(request, env);
+		if (rateLimit.limited) return tooManyLoginAttempts(rateLimit.retryAfterSeconds);
+		if (typeof body.password !== 'string' || (await getVaultIdForPassword(env, body.password)) !== session.vaultId || typeof body.code !== 'string') return unauthorized();
+		if (!(await verifyTotpOrRecoveryCode(env, body.code))) {
+			const failure = await recordFailedLogin(env, rateLimit.key);
+			if (failure.locked) return tooManyLoginAttempts(failure.retryAfterSeconds);
+			return unauthorized();
+		}
+		await clearFailedLogins(env, rateLimit.key);
+		await env.DB.batch([
+			env.DB.prepare('DELETE FROM auth_recovery_codes'),
+			env.DB.prepare('DELETE FROM app_meta WHERE key IN (?, ?)').bind(TOTP_ENABLED_META_KEY, TOTP_SECRET_META_KEY),
+		]);
+		return json({ ok: true });
+	}
+
+	if (url.pathname === '/api/auth/reauth' && request.method === 'POST') {
+		const session = await getSession(request, env);
+		if (!session.authenticated || !session.sessionId) return unauthorized();
+		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
+		const rateLimit = await getLoginRateLimit(request, env);
+		if (rateLimit.limited) return tooManyLoginAttempts(rateLimit.retryAfterSeconds);
+		if (typeof body.password !== 'string' || (await getVaultIdForPassword(env, body.password)) !== session.vaultId) {
+			const failure = await recordFailedLogin(env, rateLimit.key);
+			if (failure.locked) return tooManyLoginAttempts(failure.retryAfterSeconds);
+			return unauthorized();
+		}
+		if (await isTotpEnabled(env) && (typeof body.code !== 'string' || !(await verifyTotpOrRecoveryCode(env, body.code)))) {
+			const failure = await recordFailedLogin(env, rateLimit.key);
+			if (failure.locked) return tooManyLoginAttempts(failure.retryAfterSeconds);
+			return unauthorized();
+		}
+		await clearFailedLogins(env, rateLimit.key);
+		const now = Date.now();
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?, last_reauth_at = ? WHERE id_hash = ? AND revoked_at IS NULL').bind(now, now, await (async () => { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`private-notes-auth:v1\u0000${session.sessionId}`)); return bytesToBase64Url(new Uint8Array(d)); })()).run();
+		const token = await createSessionToken(env, session.vaultId, session.sessionId);
+		return json({ ok: true, vaultId: session.vaultId }, 200, { 'set-cookie': `${SESSION_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}` });
+	}
+
 	if (url.pathname === '/api/logout' && request.method === 'POST') {
+		const current = await getSession(request, env);
+		if (current.sessionId) {
+			const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`private-notes-auth:v1\u0000${current.sessionId}`));
+			await env.DB.prepare('UPDATE auth_sessions SET revoked_at = ? WHERE id_hash = ?').bind(Date.now(), bytesToBase64Url(new Uint8Array(digest))).run();
+		}
 		return json(
 			{ ok: true },
 			200,
@@ -575,6 +706,15 @@ async function handleRequest(request: Request, env: AppEnv): Promise<Response> {
 
 	const session = url.pathname.startsWith('/api/') ? await getSession(request, env) : null;
 	if (session && !session.authenticated) return unauthorized();
+	if (session?.reauthRequired) return json({ ok: false, error: 'reauth_required' }, 401);
+	const shouldTouchActivity = Boolean(
+		session?.sessionId &&
+		!['/api/session', '/api/health', '/api/login', '/api/login/totp', '/api/auth/reauth'].includes(url.pathname)
+	);
+	if (shouldTouchActivity) {
+		const { touchSessionActivity } = await import('./auth');
+		await touchSessionActivity(env, session!.sessionId!);
+	}
 	const vaultId = session?.vaultId || 'default';
 
 	if (url.pathname === '/api/shares' && request.method === 'POST') {
@@ -730,6 +870,12 @@ export default {
 					json({ ok: false, error: error.message, code: error.code }, error.status),
 					requestId
 				);
+			}
+			if (error instanceof Error && error.message === 'reauth_required') {
+				return withCommonHeaders(json({ ok: false, error: 'reauth_required' }, 401), requestId);
+			}
+			if (error instanceof Error && error.message === 'unauthorized') {
+				return withCommonHeaders(unauthorized(), requestId);
 			}
 
 			console.error(`Unhandled request error (${requestId})`, error);

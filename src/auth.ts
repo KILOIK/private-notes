@@ -6,6 +6,7 @@ type AuthEnv = {
 };
 
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+export const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const SESSION_COOKIE_NAME = '__Host-session';
 export const MAX_PASSWORD_LENGTH = 1024;
 
@@ -17,6 +18,11 @@ const MAX_SESSION_TOKEN_LENGTH = 4096;
 const MIN_COOKIE_SECRET_LENGTH = 32;
 const MANAGED_SIGNING_SECRET_META_KEY = 'managed_signing_secret:v1';
 const MANAGED_SIGNING_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const TOTP_ENABLED_META_KEY = 'totp_enabled';
+const TOTP_SECRET_META_KEY = 'totp_secret:v1';
+const TOTP_PENDING_META_KEY = 'totp_pending:v1';
+const TOTP_CHALLENGE_PREFIX = 'totp_challenge:v1:';
+const TOTP_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const UNSAFE_NEW_APP_PASSWORDS = new Set(['replace-with-a-long-unique-passphrase']);
 const UNSAFE_COOKIE_SECRETS = new Set([
 	'change-this-to-a-long-random-string',
@@ -28,10 +34,14 @@ type VaultCredential = {
 	password: string;
 };
 
-type SessionData = {
+export type SessionData = {
 	authenticated: boolean;
 	vaultId: string;
+	reauthRequired: boolean;
+	sessionId: string | null;
 };
+
+type VerifiedToken = { vaultId: string; sessionId: string | null; legacy: boolean; exp: number };
 
 function getCookie(request: Request, name: string) {
 	const cookie = request.headers.get('cookie') || '';
@@ -210,6 +220,29 @@ async function getCredentialFingerprint(env: AuthEnv, credential: VaultCredentia
 	);
 }
 
+export async function getCredentialFingerprintForVault(env: AuthEnv, vaultId: string) {
+	const normalizedVaultId = normalizeVaultId(vaultId);
+	const credential = getVaultCredentials(env).find((item) => item.vaultId === normalizedVaultId);
+	return credential ? getCredentialFingerprint(env, credential) : '';
+}
+
+async function hashOpaque(value: string) {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`private-notes-auth:v1\u0000${value}`));
+	return base64UrlEncode(new Uint8Array(digest));
+}
+
+export async function isTotpEnabled(env: AuthEnv) {
+	const row = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1')
+		.bind(TOTP_ENABLED_META_KEY).first<{ value: string }>();
+	return row?.value === '1';
+}
+
+async function getTotpSecretCiphertext(env: AuthEnv) {
+	const row = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1')
+		.bind(TOTP_SECRET_META_KEY).first<{ value: string }>();
+	return row?.value ?? null;
+}
+
 export async function getVaultIdForPassword(env: AuthEnv, password: string) {
 	if (getAuthConfigurationError(env)) return null;
 
@@ -224,18 +257,29 @@ export async function getVaultIdForPassword(env: AuthEnv, password: string) {
 	return null;
 }
 
-export async function createSessionToken(env: AuthEnv, vaultId = DEFAULT_VAULT_ID) {
+export async function createSessionToken(env: AuthEnv, vaultId = DEFAULT_VAULT_ID, existingSessionId?: string) {
 	if (getAuthConfigurationError(env)) return '';
 	const normalizedVaultId = normalizeVaultId(vaultId);
 	const credential = getVaultCredentials(env).find((item) => item.vaultId === normalizedVaultId);
 	if (!credential) return '';
 
-	const now = Math.floor(Date.now() / 1000);
+	const nowMs = Date.now();
+	const now = Math.floor(nowMs / 1000);
+	const sessionId = existingSessionId || base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+	const idHash = await hashOpaque(sessionId);
+	await env.DB.prepare(
+		`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, NULL)
+		 ON CONFLICT(id_hash) DO UPDATE SET vault_id = excluded.vault_id, expires_at = excluded.expires_at`
+	)
+		.bind(idHash, normalizedVaultId, nowMs, nowMs, nowMs, nowMs + SESSION_MAX_AGE_SECONDS * 1000)
+		.run();
 	const payload = base64UrlEncode(
 		JSON.stringify({
-			v: 2,
+			v: 3,
 			vaultId: normalizedVaultId,
 			credential: await getCredentialFingerprint(env, credential),
+			sessionId,
 			iat: now,
 			exp: now + SESSION_MAX_AGE_SECONDS,
 		})
@@ -244,7 +288,7 @@ export async function createSessionToken(env: AuthEnv, vaultId = DEFAULT_VAULT_I
 	return `${payload}.${signature}`;
 }
 
-async function verifySessionToken(env: AuthEnv, token: string) {
+async function verifySessionToken(env: AuthEnv, token: string): Promise<VerifiedToken | null> {
 	if (getAuthConfigurationError(env) || token.length > MAX_SESSION_TOKEN_LENGTH) return null;
 	const parts = token.split('.');
 	if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
@@ -258,10 +302,11 @@ async function verifySessionToken(env: AuthEnv, token: string) {
 			exp?: unknown;
 			v?: unknown;
 			vaultId?: unknown;
+			sessionId?: unknown;
 		};
 		const now = Math.floor(Date.now() / 1000);
 		if (
-			data.v !== 2 ||
+			(data.v !== 2 && data.v !== 3) ||
 			typeof data.exp !== 'number' ||
 			!Number.isSafeInteger(data.exp) ||
 			data.exp <= now ||
@@ -275,7 +320,10 @@ async function verifySessionToken(env: AuthEnv, token: string) {
 		const credential = getVaultCredentials(env).find((item) => item.vaultId === data.vaultId);
 		if (!credential) return null;
 		const currentFingerprint = await getCredentialFingerprint(env, credential);
-		return safeEqual(data.credential, currentFingerprint) ? credential.vaultId : null;
+		if (!safeEqual(data.credential, currentFingerprint)) return null;
+		if (data.v === 2) return { vaultId: credential.vaultId, sessionId: null, legacy: true, exp: data.exp as number };
+		if (typeof data.sessionId !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.sessionId)) return null;
+		return { vaultId: credential.vaultId, sessionId: data.sessionId, legacy: false, exp: data.exp as number };
 	} catch {
 		return null;
 	}
@@ -283,15 +331,50 @@ async function verifySessionToken(env: AuthEnv, token: string) {
 
 export async function getSession(request: Request, env: AuthEnv): Promise<SessionData> {
 	if (getAuthConfigurationError(env)) {
-		return { authenticated: false, vaultId: DEFAULT_VAULT_ID };
+		return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
 	}
 
 	const session = getCookie(request, SESSION_COOKIE_NAME);
-	if (!session) return { authenticated: false, vaultId: DEFAULT_VAULT_ID };
-	const vaultId = await verifySessionToken(env, session);
-	return vaultId
-		? { authenticated: true, vaultId }
-		: { authenticated: false, vaultId: DEFAULT_VAULT_ID };
+	if (!session) return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
+	const verified = await verifySessionToken(env, session);
+	if (!verified) return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
+	const totpEnabled = await isTotpEnabled(env);
+	const sessionId = verified.sessionId || await hashOpaque(session);
+	const idHash = await hashOpaque(sessionId);
+	if (verified.legacy) {
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
+			 VALUES (?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id_hash) DO NOTHING`
+		).bind(idHash, verified.vaultId, now, now, now, verified.exp * 1000).run();
+	}
+	const row = await env.DB.prepare(
+		`SELECT last_activity_at, last_reauth_at, expires_at, revoked_at FROM auth_sessions WHERE id_hash = ? LIMIT 1`
+	).bind(idHash).first<{ last_activity_at: number; last_reauth_at: number; expires_at: number; revoked_at: number | null }>();
+	if (!row || row.revoked_at || row.expires_at <= Date.now()) {
+		return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
+	}
+	const reauthRequired = verified.legacy ? totpEnabled : Date.now() - row.last_activity_at > SESSION_IDLE_TIMEOUT_MS;
+	return { authenticated: true, vaultId: verified.vaultId, reauthRequired, sessionId };
+}
+
+export async function touchSessionActivity(env: AuthEnv, sessionId: string, nowMs = Date.now()) {
+	const idHash = await hashOpaque(sessionId);
+	await env.DB.prepare(
+		'UPDATE auth_sessions SET last_activity_at = ? WHERE id_hash = ? AND revoked_at IS NULL AND expires_at > ?'
+	).bind(nowMs, idHash, nowMs).run();
+}
+
+export async function requireActiveSession(
+	request: Request,
+	env: AuthEnv,
+	options: { touch?: boolean } = {}
+): Promise<SessionData> {
+	const session = await getSession(request, env);
+	if (!session.authenticated) throw new Error('unauthorized');
+	if (session.reauthRequired) throw new Error('reauth_required');
+	if (options.touch && session.sessionId) await touchSessionActivity(env, session.sessionId);
+	return session;
 }
 
 function getClientIp(request: Request) {
@@ -396,3 +479,100 @@ export function tooManyLoginAttempts(retryAfterSeconds: number) {
 		}
 	);
 }
+
+async function challengeKey(challengeId: string) {
+	return `${TOTP_CHALLENGE_PREFIX}${await hashOpaque(challengeId)}`;
+}
+
+export async function createPendingTwoFactorChallenge(
+	env: AuthEnv,
+	vaultId: string,
+	passwordFingerprint: string
+) {
+	const challengeId = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+	const now = Date.now();
+	const key = await challengeKey(challengeId);
+	await env.DB.prepare(
+		`INSERT INTO app_meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+	).bind(key, JSON.stringify({ vaultId: normalizeVaultId(vaultId), passwordFingerprint, expiresAt: now + TOTP_CHALLENGE_TTL_MS })).run();
+	return challengeId;
+}
+
+async function consumeRecoveryCode(env: AuthEnv, code: string) {
+	let hash: string;
+	try {
+		const module = await import('./totp');
+		hash = await module.hashRecoveryCode(code);
+	} catch {
+		return false;
+	}
+	const row = await env.DB.prepare(
+		'UPDATE auth_recovery_codes SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL RETURNING code_hash'
+	).bind(Date.now(), hash).first<{ code_hash: string }>();
+	return Boolean(row);
+}
+
+export async function verifyTwoFactorChallenge(
+	env: AuthEnv,
+	challengeId: string,
+	codeOrRecoveryCode: string
+): Promise<SessionData | null> {
+	if (typeof challengeId !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(challengeId)) return null;
+	const key = await challengeKey(challengeId);
+	const row = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1').bind(key).first<{ value: string }>();
+	if (!row) return null;
+	let challenge: { vaultId?: string; passwordFingerprint?: string; expiresAt?: number };
+	try { challenge = JSON.parse(row.value) as typeof challenge; } catch { return null; }
+	if (!challenge.vaultId || !challenge.passwordFingerprint || !challenge.expiresAt || challenge.expiresAt <= Date.now()) {
+		await env.DB.prepare('DELETE FROM app_meta WHERE key = ?').bind(key).run();
+		return null;
+	}
+	const currentFingerprint = await getCredentialFingerprintForVault(env, challenge.vaultId);
+	if (!currentFingerprint || !safeEqual(currentFingerprint, challenge.passwordFingerprint)) return null;
+	const secretCiphertext = await getTotpSecretCiphertext(env);
+	const enabled = await isTotpEnabled(env);
+	let valid = false;
+	if (enabled && secretCiphertext) {
+		try {
+			const { decryptTotpSecret } = await import('./totp-secret');
+			const secret = await decryptTotpSecret(secretCiphertext, env.COOKIE_SECRET!);
+			const { verifyTotpCode } = await import('./totp');
+			valid = (await verifyTotpCode(secret, codeOrRecoveryCode, Date.now(), 1)).valid;
+		} catch { valid = false; }
+	}
+	if (!valid) valid = await consumeRecoveryCode(env, codeOrRecoveryCode);
+	if (!valid) return null;
+	const consumed = await env.DB.prepare(
+		'UPDATE app_meta SET value = ? WHERE key = ? AND value = ? RETURNING key'
+	).bind('consumed', key, row.value).first<{ key: string }>();
+	if (!consumed) return null;
+	await env.DB.prepare('DELETE FROM app_meta WHERE key = ? AND value = ?').bind(key, 'consumed').run();
+	const sessionId = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+	const now = Date.now();
+	await env.DB.prepare(
+		`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, NULL)`
+	).bind(await hashOpaque(sessionId), challenge.vaultId, now, now, now, now + SESSION_MAX_AGE_SECONDS * 1000).run();
+	return { authenticated: true, vaultId: challenge.vaultId, reauthRequired: false, sessionId };
+}
+
+export async function verifyTotpOrRecoveryCode(env: AuthEnv, code: string) {
+	const ciphertext = await getTotpSecretCiphertext(env);
+	if (ciphertext && await isTotpEnabled(env)) {
+		try {
+			const { decryptTotpSecret } = await import('./totp-secret');
+			const { verifyTotpCode } = await import('./totp');
+			const secret = await decryptTotpSecret(ciphertext, env.COOKIE_SECRET!);
+			if ((await verifyTotpCode(secret, code, Date.now(), 1)).valid) return true;
+		} catch { /* generic unauthorized */ }
+	}
+	return consumeRecoveryCode(env, code);
+}
+
+export async function getTotpEnrollment(env: AuthEnv) {
+	const row = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1').bind(TOTP_PENDING_META_KEY).first<{ value: string }>();
+	return row?.value ?? null;
+}
+
+export { TOTP_ENABLED_META_KEY, TOTP_SECRET_META_KEY, TOTP_PENDING_META_KEY };

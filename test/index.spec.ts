@@ -534,6 +534,36 @@ describe('private-notes worker', () => {
 		await expect(revoked.json()).resolves.toMatchObject({ authenticated: false });
 	});
 
+	it('requires password reauthentication after thirty minutes of inactivity', async () => {
+		const { cookie } = await login();
+		const staleAt = Date.now() - 30 * 60 * 1000 - 1;
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(staleAt).run();
+		const blocked = await api('/api/notes', { headers: { cookie } });
+		expect(blocked.status).toBe(401);
+		await expect(blocked.json()).resolves.toMatchObject({ ok: false, error: 'reauth_required' });
+
+		const resumed = await api('/api/auth/reauth', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+		});
+		expect(resumed.status).toBe(200);
+		const session = await api('/api/session', { headers: { cookie } });
+		await expect(session.json()).resolves.toMatchObject({ authenticated: true, reauthRequired: false });
+	});
+
+	it('switches password login to a deployment-wide two-factor challenge', async () => {
+		await env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?)').bind('totp_enabled', '1').run();
+		const response = await api('/api/login', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+		});
+		expect(response.status).toBe(202);
+		await expect(response.json()).resolves.toMatchObject({ ok: false, code: 'two_factor_required' });
+		expect(response.headers.get('set-cookie')).toBeNull();
+	});
+
 	it('initializes one stable vault salt and key check', async () => {
 		const { cookie } = await login();
 		const [first, second] = await Promise.all([
