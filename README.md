@@ -61,7 +61,7 @@ Cloudflare 会把项目克隆到你的 GitHub/GitLab 账号，自动创建 Worke
 图片附件需要额外创建一个私有 R2 bucket，并让 `wrangler.jsonc` 的 `ATTACHMENTS` 绑定指向它：
 
 ```bash
-npx wrangler r2 bucket create private-notes-attachments
+npx wrangler r2 bucket create private-notes-r2
 ```
 
 不要给该 bucket 配置公开域名或公开读取策略。图片上传前会在浏览器加密，Worker 只接收密文；收件人查看分享时，图片密文作为分享密文的一部分传输，不会访问发送者的私有附件接口。
@@ -91,7 +91,7 @@ npx wrangler deploy --secrets-file .dev.vars
 npm run db:migrations:apply
 ```
 
-如果已有生产 Worker，请先确认 `private-notes-attachments` 已存在且 R2 绑定名称为 `ATTACHMENTS`，再运行部署和迁移。
+如果已有生产 Worker，请先确认 `private-notes-r2` 已存在且 R2 绑定名称为 `ATTACHMENTS`，再运行部署和迁移。
 
 部署前复制 `.dev.vars.example` 为 `.dev.vars` 并替换 `APP_PASSWORD` 示例值；该文件已被 Git 忽略，不得提交。首次 `wrangler deploy` 会自动创建 D1 并把 ID 写回当前配置，随后 migrations 建立正式 schema。以后升级可直接运行 `npm run deploy`。生产升级应先在 staging D1 验证向后兼容性，并在迁移前记录 D1 Time Travel 恢复点。
 

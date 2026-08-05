@@ -41,7 +41,7 @@
 	"r2_buckets": [
 		{
 			"binding": "ATTACHMENTS",
-			"bucket_name": "private-notes-attachments"
+			"bucket_name": "private-notes-r2"
 		}
 	],
 	"observability": {
