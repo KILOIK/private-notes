@@ -74,6 +74,11 @@ async function createNote(
 }
 
 beforeEach(async () => {
+	try {
+		await env.DB.prepare('DELETE FROM note_folders').run();
+	} catch {
+		// The table is intentionally absent during the RED phase.
+	}
 	await env.DB.batch([
 		env.DB.prepare('DELETE FROM notes'),
 		env.DB.prepare('DELETE FROM note_shares'),
@@ -86,6 +91,99 @@ beforeEach(async () => {
 });
 
 describe('private-notes worker', () => {
+	it('creates the note_folders table', async () => {
+		const table = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'note_folders'"
+		).first<{ name: string }>();
+		expect(table?.name).toBe('note_folders');
+	});
+
+	it('stores only encrypted folder names', async () => {
+		const { cookie } = await login();
+		const id = crypto.randomUUID();
+		const name = encryptedValue('private-folder-name');
+		const response = await api('/api/folders', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ id, name }),
+		});
+		expect(response.status).toBe(201);
+		const body = await jsonBody(response);
+		expect(body.folder).toMatchObject({ id, name });
+		expect(body.folder).not.toHaveProperty('vault_id');
+		expect(body.folder).not.toHaveProperty('revision');
+		const stored = await env.DB.prepare('SELECT id, name FROM note_folders WHERE id = ?').bind(id).first<{ id: string; name: string }>();
+		expect(stored).toMatchObject({ id, name });
+		expect(stored?.name).not.toContain('private-folder-name');
+	});
+
+	it('isolates folders by vault', async () => {
+		const defaultLogin = await login(DEFAULT_PASSWORD, '203.0.113.31');
+		const guestLogin = await login(GUEST_PASSWORD, '203.0.113.32');
+		const defaultCreate = await api('/api/folders', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', cookie: defaultLogin.cookie },
+			body: JSON.stringify({ id: crypto.randomUUID(), name: encryptedValue('default-folder') }),
+		});
+		const guestCreate = await api('/api/folders', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', cookie: guestLogin.cookie },
+			body: JSON.stringify({ id: crypto.randomUUID(), name: encryptedValue('guest-folder') }),
+		});
+		expect(defaultCreate.status).toBe(201);
+		expect(guestCreate.status).toBe(201);
+		const defaultList = await jsonBody(await api('/api/folders', { headers: { cookie: defaultLogin.cookie } }));
+		const guestList = await jsonBody(await api('/api/folders', { headers: { cookie: guestLogin.cookie } }));
+		expect(defaultList.folders).toHaveLength(1);
+		expect(guestList.folders).toHaveLength(1);
+		expect((defaultList.folders as JsonRecord[])[0].name).toBe(encryptedValue('default-folder'));
+		expect((guestList.folders as JsonRecord[])[0].name).toBe(encryptedValue('guest-folder'));
+	});
+
+	it('rejects duplicate folder ids', async () => {
+		const { cookie } = await login();
+		const id = crypto.randomUUID();
+		const create = (name: string) =>
+			api('/api/folders', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', cookie },
+				body: JSON.stringify({ id, name: encryptedValue(name) }),
+			});
+		expect((await create('first')).status).toBe(201);
+		const duplicate = await create('second');
+		expect(duplicate.status).toBe(409);
+		await expect(duplicate.json()).resolves.toMatchObject({ ok: false, code: 'id_conflict' });
+	});
+
+	it('updates folders with an optimistic revision', async () => {
+		const { cookie } = await login();
+		const id = crypto.randomUUID();
+		const created = await jsonBody(
+			await api('/api/folders', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', cookie },
+				body: JSON.stringify({ id, name: encryptedValue('before') }),
+			})
+		);
+		const folder = created.folder as JsonRecord;
+		const revision = Number(folder.updated_at);
+		const updated = await api(`/api/folders/${id}`, {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ name: encryptedValue('after'), revision }),
+		});
+		expect(updated.status).toBe(200);
+		const updatedBody = await jsonBody(updated);
+		expect(updatedBody.folder).toMatchObject({ id, name: encryptedValue('after') });
+		const stale = await api(`/api/folders/${id}`, {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ name: encryptedValue('stale'), revision }),
+		});
+		expect(stale.status).toBe(409);
+		await expect(stale.json()).resolves.toMatchObject({ ok: false, error: 'revision_conflict' });
+	});
+
 	it('serves the application shell through the Static Assets binding', async () => {
 		const response = await env.ASSETS.fetch(new Request(`${ORIGIN}/`));
 		expect(response.status).toBe(200);
@@ -335,6 +433,7 @@ describe('private-notes worker', () => {
 			env.DB.prepare('DROP TABLE IF EXISTS auth_sessions'),
 			env.DB.prepare('DROP TABLE IF EXISTS auth_recovery_codes'),
 			env.DB.prepare('DROP TABLE IF EXISTS note_attachments'),
+			env.DB.prepare('DROP TABLE IF EXISTS note_folders'),
 			env.DB.prepare('DROP TABLE IF EXISTS note_shares'),
 			env.DB.prepare('DROP TABLE IF EXISTS notes'),
 			env.DB.prepare('DROP TABLE IF EXISTS app_meta'),
@@ -355,11 +454,11 @@ describe('private-notes worker', () => {
 			`SELECT name FROM sqlite_master
 			 WHERE type = 'table'
 			 AND name IN ('app_meta', 'auth_rate_limits', 'auth_recovery_codes',
-				'auth_sessions', 'd1_migrations', 'note_attachments', 'note_shares', 'notes')`
+				'auth_sessions', 'd1_migrations', 'note_attachments', 'note_folders', 'note_shares', 'notes')`
 		).all<{ name: string }>();
 		expect(new Set((tables.results ?? []).map((row) => row.name))).toEqual(
 			new Set(['app_meta', 'auth_rate_limits', 'auth_recovery_codes',
-				'auth_sessions', 'd1_migrations', 'note_attachments', 'note_shares', 'notes'])
+				'auth_sessions', 'd1_migrations', 'note_attachments', 'note_folders', 'note_shares', 'notes'])
 		);
 		const journal = await env.DB.prepare('SELECT name FROM d1_migrations ORDER BY id').all<{ name: string }>();
 		expect((journal.results ?? []).map((row) => row.name)).toEqual([
@@ -372,6 +471,7 @@ describe('private-notes worker', () => {
 			'0007_one_time_shares.sql',
 			'0008_attachments.sql',
 			'0009_totp_sessions.sql',
+			'0010_note_folders.sql',
 		]);
 		const noteColumns = await env.DB.prepare('PRAGMA table_info(notes)').all<{ name: string }>();
 		expect((noteColumns.results ?? []).map((column) => column.name)).toEqual([
@@ -395,6 +495,7 @@ describe('private-notes worker', () => {
 			env.DB.prepare('DROP TABLE IF EXISTS auth_sessions'),
 			env.DB.prepare('DROP TABLE IF EXISTS auth_recovery_codes'),
 			env.DB.prepare('DROP TABLE IF EXISTS note_attachments'),
+			env.DB.prepare('DROP TABLE IF EXISTS note_folders'),
 			env.DB.prepare('DROP TABLE IF EXISTS note_shares'),
 			env.DB.prepare('DROP TABLE IF EXISTS notes'),
 			env.DB.prepare('DROP TABLE IF EXISTS app_meta'),

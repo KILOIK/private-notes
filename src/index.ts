@@ -56,6 +56,13 @@ type Note = {
 	revision: number;
 };
 
+type Folder = {
+	id: string;
+	name: string;
+	created_at: number;
+	updated_at: number;
+};
+
 type NoteCursor = {
 	id: string;
 	updatedAt: number;
@@ -815,6 +822,82 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		const candidate = requireEncryptedValue(body.keyCheck, 'keyCheck', MAX_KEY_CHECK_LENGTH);
 		const keyCheck = await initializeVaultKeyCheck(env, vaultId, candidate);
 		return json({ ok: true, keyCheck });
+	}
+
+	if (url.pathname === '/api/folders' && request.method === 'GET') {
+		const result = await env.DB.prepare(
+			`SELECT id, name, created_at, updated_at
+			 FROM note_folders
+			 WHERE vault_id = ?
+			 ORDER BY updated_at DESC, id ASC`
+		)
+			.bind(vaultId)
+			.all<Folder>();
+		return json({ ok: true, folders: result.results ?? [] });
+	}
+
+	if (url.pathname === '/api/folders' && request.method === 'POST') {
+		const body = await readJsonObject(request, MAX_NOTE_BODY_BYTES);
+		const name = requireEncryptedValue(body.name, 'name', MAX_ENCRYPTED_TITLE_LENGTH);
+		const id = body.id === undefined ? crypto.randomUUID() : requireNoteId(body.id);
+		const now = Date.now();
+		const folder = await env.DB.prepare(
+			`INSERT INTO note_folders (id, vault_id, name, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(vault_id, id) DO NOTHING
+			 RETURNING id, name, created_at, updated_at`
+		)
+			.bind(id, vaultId, name, now, now)
+			.first<Folder>();
+		if (!folder) return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
+		return json({ ok: true, folder }, 201);
+	}
+
+	const folderMatch = /^\/api\/folders\/([^/]+)$/.exec(url.pathname);
+	if (folderMatch) {
+		let folderId: string;
+		try {
+			folderId = requireNoteId(decodeURIComponent(folderMatch[1]));
+		} catch (error) {
+			if (error instanceof ApiError) throw error;
+			throw new ApiError(400, 'invalid_id', 'id must be a UUID');
+		}
+
+		if (request.method === 'PUT') {
+			const body = await readJsonObject(request, MAX_NOTE_BODY_BYTES);
+			const name = requireEncryptedValue(body.name, 'name', MAX_ENCRYPTED_TITLE_LENGTH);
+			if (!Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
+				throw new ApiError(428, 'revision_required', 'a positive revision is required');
+			}
+			const revision = body.revision as number;
+			const now = Date.now();
+			const folder = await env.DB.prepare(
+				`UPDATE note_folders
+				 SET name = ?,
+				     updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
+				 WHERE id = ? AND vault_id = ? AND updated_at = ?
+				 RETURNING id, name, created_at, updated_at`
+			)
+				.bind(name, now, now, folderId, vaultId, revision)
+				.first<Folder>();
+			if (folder) return json({ ok: true, folder });
+			const existing = await env.DB.prepare(
+				'SELECT updated_at FROM note_folders WHERE id = ? AND vault_id = ? LIMIT 1'
+			)
+				.bind(folderId, vaultId)
+				.first<{ updated_at: number }>();
+			if (!existing) return json({ ok: false, error: 'not_found' }, 404);
+			return json({ ok: false, error: 'revision_conflict', currentRevision: existing.updated_at }, 409);
+		}
+
+		if (request.method === 'DELETE') {
+			const deleted = await env.DB.prepare(
+				'DELETE FROM note_folders WHERE id = ? AND vault_id = ? RETURNING id'
+			)
+				.bind(folderId, vaultId)
+				.first<{ id: string }>();
+			return deleted ? json({ ok: true }) : json({ ok: false, error: 'not_found' }, 404);
+		}
 	}
 
 	if (url.pathname === '/api/notes' && request.method === 'GET') {

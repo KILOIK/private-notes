@@ -9,6 +9,7 @@ const APPLICATION_TABLE_NAMES = [
 	'auth_sessions',
 	'd1_migrations',
 	'note_attachments',
+	'note_folders',
 	'note_shares',
 	'notes',
 ] as const;
@@ -22,6 +23,7 @@ const APPLIED_MIGRATIONS = [
 	'0007_one_time_shares.sql',
 	'0008_attachments.sql',
 	'0009_totp_sessions.sql',
+	'0010_note_folders.sql',
 ] as const;
 
 const schemaChecks = new WeakMap<object, Promise<void>>();
@@ -132,6 +134,23 @@ async function initializeFreshDatabase(db: D1Database) {
 		db.prepare(
 			`CREATE INDEX IF NOT EXISTS idx_note_attachments_status_created_at
 			 ON note_attachments(status, created_at)`
+		),
+		db.prepare(
+			`CREATE TABLE IF NOT EXISTS note_folders (
+			 id TEXT NOT NULL,
+			 vault_id TEXT NOT NULL,
+			 name TEXT NOT NULL,
+			 created_at INTEGER NOT NULL,
+			 updated_at INTEGER NOT NULL
+			)`
+		),
+		db.prepare(
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_vault_id
+			 ON note_folders(vault_id, id)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_note_folders_vault_updated_id
+			 ON note_folders(vault_id, updated_at DESC, id ASC)`
 		),
 		db.prepare(
 			`CREATE TABLE IF NOT EXISTS auth_recovery_codes (

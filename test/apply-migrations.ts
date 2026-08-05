@@ -11,6 +11,7 @@ const REQUIRED_MIGRATIONS = [
 	'0007_one_time_shares.sql',
 	'0008_attachments.sql',
 	'0009_totp_sessions.sql',
+	'0010_note_folders.sql',
 ] as const;
 
 const migrationNames = new Set(env.TEST_MIGRATIONS.map((migration) => migration.name));
