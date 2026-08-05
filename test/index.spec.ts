@@ -581,6 +581,16 @@ describe('private-notes worker', () => {
 		await expect(session.json()).resolves.toMatchObject({ authenticated: true, reauthRequired: false });
 	});
 
+	it('reports deployment-wide authenticator state to authenticated clients', async () => {
+		const { cookie } = await login();
+		const disabled = await api('/api/health', { headers: { cookie } });
+		await expect(disabled.json()).resolves.toMatchObject({ ok: true, totpEnabled: false });
+
+		await env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?)').bind('totp_enabled', '1').run();
+		const enabled = await api('/api/health', { headers: { cookie } });
+		await expect(enabled.json()).resolves.toMatchObject({ ok: true, totpEnabled: true });
+	});
+
 	it('switches password login to a deployment-wide two-factor challenge', async () => {
 		await env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?)').bind('totp_enabled', '1').run();
 		const response = await api('/api/login', {

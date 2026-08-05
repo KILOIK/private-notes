@@ -790,6 +790,7 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 			ok: true,
 			noteCount: result?.note_count ?? 0,
 			authEnabled: true,
+			totpEnabled: await isTotpEnabled(env),
 			vaultCount: getConfiguredVaultCount(env),
 			now: Date.now(),
 		});

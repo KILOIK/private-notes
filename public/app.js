@@ -37,6 +37,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * pendingLoginChallenge: string | null,
  * pendingLoginPassword: string,
  * reauthRequired: boolean,
+ * totpEnabled: boolean,
  * idleTimer: number | null
  * }} */
 const state = {
@@ -66,6 +67,7 @@ const state = {
   pendingLoginChallenge: null,
   pendingLoginPassword: '',
   reauthRequired: false,
+  totpEnabled: false,
   idleTimer: null
 };
 /**
@@ -360,6 +362,8 @@ async function getCryptoConfig() {
 async function refreshMeta() {
   const data = await api('/api/health');
   state.noteCountMeta = data.noteCount || 0;
+  state.totpEnabled = Boolean(data.totpEnabled);
+  updateTotpUi();
   updateVaultUi();
 }
 
@@ -432,13 +436,36 @@ async function encryptValue(value) {
  * @param {Note} note
  */
 async function encryptShare(note) {
+  const attachments = await collectShareAttachments(note);
   return encryptSharedPayload({
     v: 1,
     title: note.title || '无标题',
     content: note.content || '',
     createdAt: note.created_at,
-    sharedAt: Date.now()
+    sharedAt: Date.now(),
+    ...(attachments.length ? { attachments: attachments } : {})
   });
+}
+
+/** @param {Note} note */
+async function collectShareAttachments(note) {
+  const ids = extractAttachmentIds(note.content || '');
+  if (!ids.length) return [];
+  if (!state.vaultKey) throw new Error('请先解锁内容');
+  const listed = await api('/api/attachments?noteId=' + encodeURIComponent(note.id));
+  const metadata = new Map((/** @type {Array<{ id: string, mime_type: string }>} */ (listed.attachments || [])).map(function (item) { return [item.id, item]; }));
+  const entries = [];
+  for (const id of ids) {
+    const item = metadata.get(id);
+    if (!item) throw new Error('分享图片缺少附件元数据');
+    const response = await fetch('/api/attachments/' + encodeURIComponent(id), { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('分享图片读取失败');
+    const plain = await decryptAttachment(await response.arrayBuffer(), item.mime_type, state.vaultKey);
+    const bytes = new Uint8Array(await plain.arrayBuffer());
+    entries.push({ id: id, mimeType: plain.type, ciphertext: bytesToBase64(bytes) });
+    bytes.fill(0);
+  }
+  return entries;
 }
 
 /**
@@ -569,6 +596,12 @@ function showApp() {
     els.securityPanel.classList.add('hidden');
   }
   updateVaultUi();
+}
+
+function updateTotpUi() {
+  const enrollmentOpen = !els.totpEnrollmentPanel.classList.contains('hidden');
+  els.enrollTotpBtn.classList.toggle('hidden', state.totpEnabled || enrollmentOpen);
+  els.disableTotpBtn.classList.toggle('hidden', !state.totpEnabled);
 }
 
 /** @param {number} ts */
@@ -1347,7 +1380,7 @@ async function enrollTotp() {
   els.totpRecoveryCodes.value = '';
   els.totpEnrollmentPanel.classList.remove('hidden');
   els.securityPanelStatus.textContent = '请先在 Authenticator 中添加密钥，再输入当前验证码确认。';
-  state.pendingLoginPassword = String(data.secret || '');
+  updateTotpUi();
 }
 
 async function confirmTotpEnrollment() {
@@ -1358,9 +1391,10 @@ async function confirmTotpEnrollment() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code: code })
   });
+  state.totpEnabled = true;
   els.totpRecoveryCodes.value = Array.isArray(data.recoveryCodes) ? data.recoveryCodes.join('\n') : '';
   els.securityPanelStatus.textContent = '二次验证已启用；请妥善保存恢复码。';
-  els.enrollTotpBtn.classList.add('hidden');
+  updateTotpUi();
 }
 
 async function disableTotp() {
@@ -1372,8 +1406,12 @@ async function disableTotp() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ password: password, code: code })
   });
+  state.totpEnabled = false;
+  els.totpEnrollmentPanel.classList.add('hidden');
+  els.totpSecretLabel.textContent = '';
+  els.totpRecoveryCodes.value = '';
   els.securityPanelStatus.textContent = '二次验证已关闭。';
-  els.enrollTotpBtn.classList.remove('hidden');
+  updateTotpUi();
   setStatus('已关闭二次验证');
 }
 
@@ -1407,6 +1445,7 @@ async function checkSession() {
   } else {
     state.sessionAuthenticated = false;
     state.reauthRequired = false;
+    state.totpEnabled = false;
     state.vaultUnlocked = false;
     state.vaultKey = null;
     state.unlockError = '';
@@ -1550,6 +1589,7 @@ async function logout() {
   state.decryptFailedCount = 0;
   state.legacyPlaintextCount = 0;
   state.reauthRequired = false;
+  state.totpEnabled = false;
   state.pendingLoginChallenge = null;
   state.pendingLoginPassword = '';
   clearSensitiveInputs();

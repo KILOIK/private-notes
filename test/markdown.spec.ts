@@ -12,7 +12,7 @@ it('extracts unique attachment references and ignores malformed tokens', () => {
 });
 
 it('inserts toolbar Markdown while preserving the textarea selection', () => {
-	const textarea = { value: 'hello world', selectionStart: 6, selectionEnd: 11 } as HTMLTextAreaElement;
+	const textarea = { value: 'hello world', selectionStart: 6, selectionEnd: 11 } as unknown as Parameters<typeof insertMarkdownAtSelection>[0];
 	insertMarkdownAtSelection(textarea, '**');
 	expect(textarea.value).toBe('hello **world**');
 	expect(textarea.selectionStart).toBe(8);

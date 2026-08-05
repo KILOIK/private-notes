@@ -1,8 +1,10 @@
 import { createShareProof, decryptSharedPayload, parseShareKeyFragment } from './share-crypto.js';
+import { revokeAttachmentUrls } from './attachment-crypto.js';
+import { renderMarkdown } from './markdown.js';
 
 /**
  * @typedef {{ token: string, keyBytes: Uint8Array }} ShareLinkData
- * @typedef {{ v: 1, title: string, content: string, createdAt: number, sharedAt: number }} SharedNotePayload
+ * @typedef {{ v: 1, title: string, content: string, createdAt: number, sharedAt: number, attachments?: Array<{ id: string, mimeType: string, ciphertext: string }> }} SharedNotePayload
  */
 
 /** @param {string} id @returns {HTMLElement} */
@@ -32,6 +34,15 @@ const els = {
 
 /** @type {ShareLinkData | null} */
 let linkData = null;
+const attachmentUrls = new Set();
+
+/** @param {string} value */
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
 
 /** @param {string} message @param {boolean} [isError] */
 function setStatus(message, isError) {
@@ -64,6 +75,14 @@ function validatePayload(value) {
   ) {
     throw new Error('分享内容格式无效');
   }
+  if (payload.attachments !== undefined) {
+    if (!Array.isArray(payload.attachments)) throw new Error('分享图片格式无效');
+    for (const attachment of payload.attachments) {
+      if (!attachment || typeof attachment !== 'object' || typeof attachment.id !== 'string' || typeof attachment.mimeType !== 'string' || typeof attachment.ciphertext !== 'string') {
+        throw new Error('分享图片格式无效');
+      }
+    }
+  }
   return /** @type {SharedNotePayload} */ (payload);
 }
 
@@ -83,8 +102,20 @@ function clearPageContent() {
   els.content.textContent = '';
   els.meta.textContent = '';
   els.note.classList.add('hidden');
+  revokeAttachmentUrls(attachmentUrls);
   if (linkData) linkData.keyBytes.fill(0);
   linkData = null;
+}
+
+/** @param {SharedNotePayload} payload */
+function renderSharedContent(payload) {
+  const attachmentMap = new Map();
+  for (const attachment of payload.attachments || []) {
+    const url = URL.createObjectURL(new Blob([base64ToBytes(attachment.ciphertext)], { type: attachment.mimeType }));
+    attachmentUrls.add(url);
+    attachmentMap.set(attachment.id, url);
+  }
+  els.content.replaceChildren(renderMarkdown(payload.content || '', attachmentMap));
 }
 
 async function consumeShare() {
@@ -113,7 +144,7 @@ async function consumeShare() {
     linkData = null;
     els.meta.textContent = '原笔记创建于 ' + formatDate(payload.createdAt) + ' · 在线 D1 记录已删除';
     els.title.textContent = payload.title || '无标题';
-    els.content.textContent = payload.content || '这条笔记没有正文。';
+    renderSharedContent(payload);
     els.intro.classList.add('hidden');
     els.note.classList.remove('hidden');
     setStatus('已解密；关闭或刷新页面后无法再次获取。');

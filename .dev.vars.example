@@ -3,3 +3,5 @@ APP_PASSWORD=replace-with-a-long-unique-passphrase
 # APP_PASSWORDS=guest=change-this-second-password
 # Optional advanced override. If omitted, Worker creates a unique 256-bit signing secret in D1.
 # COOKIE_SECRET=replace-with-at-least-32-random-characters
+# Authenticator is enrolled from the in-app security panel after deployment.
+# The whole deployment shares one authenticator; no TOTP secret belongs in this file.

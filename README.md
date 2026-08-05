@@ -5,9 +5,12 @@
 - Workers 只处理 `/api/*`
 - HTML、CSS、JavaScript 由 Workers Static Assets 边缘分发
 - 浏览器使用 PBKDF2-SHA256 + AES-256-GCM 加密标题和正文
+- 图片在浏览器使用同一 vault 密钥加密后存入私有 R2，D1 只保存附件元数据
 - D1 保存密文、时间戳和登录限流状态；API 把单调的 `updated_at` 作为 revision token
 - 搜索、解密和筛选都在当前浏览器内完成
 - 支持多密码进入相互隔离的 vault
+- 手机优先的阅读/编辑界面，支持安全 Markdown 渲染、工具栏辅助编辑、粘贴/拖拽图片
+- 整个部署共用一个 Authenticator；可使用恢复码，连续 30 分钟无操作后需要密码 + Authenticator 重新验证
 - 支持带有效期的一次性加密分享，收件人主动查看后从当前在线 D1 原子删除记录
 
 ## 安全模型
@@ -55,6 +58,16 @@ Cloudflare 会把项目克隆到你的 GitHub/GitLab 账号，自动创建 Worke
 
 `COOKIE_SECRET` 不需要填写。省略时，Worker 会在自己的 D1 中并发安全地生成每个部署独有的 256 位随机签名密钥。`APP_PASSWORDS`、`APP_NAME`、`APP_SHORT_NAME`、`APP_DESCRIPTION` 都是部署后的可选高级设置，普通用户无需操作。
 
+图片附件需要额外创建一个私有 R2 bucket，并让 `wrangler.jsonc` 的 `ATTACHMENTS` 绑定指向它：
+
+```bash
+npx wrangler r2 bucket create private-notes-attachments
+```
+
+不要给该 bucket 配置公开域名或公开读取策略。图片上传前会在浏览器加密，Worker 只接收密文；收件人查看分享时，图片密文作为分享密文的一部分传输，不会访问发送者的私有附件接口。
+
+部署完成后，在登录页的“安全设置”中绑定 Authenticator。绑定流程会显示一次性密钥和恢复码；请将恢复码离线保存。整个部署共用同一个 Authenticator，启用后所有 vault 登录及 30 分钟 idle reauth 都需要验证码。
+
 > Deploy Button 创建的是独立仓库，不是 GitHub Fork。这个项目升级频率较低，正常使用不需要配置同步。以后确实需要升级时，不要再次点击部署按钮，否则会创建新的 Worker/D1；应在原部署仓库中合并更新并继续复用现有数据库。
 
 ### 可选：启用上游更新
@@ -77,6 +90,8 @@ npx wrangler login
 npx wrangler deploy --secrets-file .dev.vars
 npm run db:migrations:apply
 ```
+
+如果已有生产 Worker，请先确认 `private-notes-attachments` 已存在且 R2 绑定名称为 `ATTACHMENTS`，再运行部署和迁移。
 
 部署前复制 `.dev.vars.example` 为 `.dev.vars` 并替换 `APP_PASSWORD` 示例值；该文件已被 Git 忽略，不得提交。首次 `wrangler deploy` 会自动创建 D1 并把 ID 写回当前配置，随后 migrations 建立正式 schema。以后升级可直接运行 `npm run deploy`。生产升级应先在 staging D1 验证向后兼容性，并在迁移前记录 D1 Time Travel 恢复点。
 
@@ -127,11 +142,14 @@ API 当前接受的标题/正文密文上限分别为 32,768/1,400,000 字符。
 - 按 IP 的原子登录失败计数
 - 多 vault 数据隔离
 - 客户端 AES-GCM 加密
+- 浏览器端图片加密与私有 R2 附件
+- 安全 Markdown 阅读器与编辑辅助工具栏
 - set-once key-check，避免空 vault 使用错误密码初始化
 - 基于 `updated_at` 的 revision 乐观锁，避免多标签页静默覆盖或误删
 - 稳定游标分页
 - 每页最多 10 条，控制接近 D1 单行上限的数据在 Workers 128 MB 内存限制内
 - 内存全文搜索
+- 部署级 Authenticator 二次验证、恢复码和 30 分钟无操作重新验证
 - 每条笔记可创建 1 小时、24 小时或 7 天有效的一次性分享链接
 - 分享密钥仅存在于 URL fragment，首次有效领取从当前在线 D1 原子删除
 - CSP 和常用浏览器安全响应头
@@ -162,6 +180,8 @@ public/
   index.html
   styles.css
   app.js
+  attachment-crypto.js
+  markdown.js
   share.html
   share.css
   share.js
@@ -175,7 +195,7 @@ src/
 migrations/
   0001_init.sql
   ...
-  0007_one_time_shares.sql
+  0009_totp_sessions.sql
 test/
   apply-migrations.ts
   index.spec.ts
@@ -192,7 +212,8 @@ wrangler.jsonc
 ## 当前限制
 
 - 主要面向单人或少量独立 vault，不是多人协作系统。
-- 不支持图片和附件；未来如增加附件，应在浏览器加密后存入 R2，D1 只保存元数据。
+- 图片只支持 JPEG、PNG、GIF、WebP，单张原始图片最大 10 MiB；附件 bucket 必须由部署者自行创建并保持私有。
+- 当前 Markdown 渲染器覆盖标题、段落、列表、引用、代码块、行内强调、HTTP(S) 链接和 `attachment://` 图片引用；不会执行 HTML、脚本或任意协议链接。
 - 当前没有自动密码轮换或恢复密钥流程。
 - 当前没有分享列表或提前撤销界面；未领取的分享会在最长 7 天后过期，并在后续创建分享时清理。
 - Static Assets 提供应用外壳，但没有离线笔记同步。
