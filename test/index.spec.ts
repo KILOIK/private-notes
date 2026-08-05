@@ -90,13 +90,18 @@ describe('private-notes worker', () => {
 		const response = await env.ASSETS.fetch(new Request(`${ORIGIN}/`));
 		expect(response.status).toBe(200);
 		expect(response.headers.get('content-type')).toContain('text/html');
-		expect(await response.text()).toContain('Private Notes');
+		const appHtml = await response.text();
+		expect(appHtml).toContain('Private Notes');
+		expect(appHtml).toContain('readerView');
+		expect(appHtml).toContain('editorToolbar');
+		expect(appHtml).toContain('totpChallengePanel');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);
 		expect(sharePage.headers.get('content-type')).toContain('text/html');
 		expect(sharePage.headers.get('cache-control')).toBe('no-store');
 		expect(sharePage.headers.get('content-security-policy')).toContain("default-src 'self'");
+		expect(sharePage.headers.get('content-security-policy')).toContain("img-src 'self' blob:");
 		expect(await sharePage.text()).toContain('查看并销毁');
 	});
 

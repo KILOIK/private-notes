@@ -37,6 +37,11 @@
             <button id="loginBtn" class="btn login-submit">进入笔记</button>
             <button id="loginLogoutBtn" class="btn secondary login-logout hidden" type="button">退出当前会话</button>
           </div>
+          <div id="totpChallengePanel" class="totp-panel hidden">
+            <label class="field-label" for="totpCodeInput">Authenticator 验证码</label>
+            <input id="totpCodeInput" class="input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="输入 6 位验证码或恢复码" />
+            <button id="totpVerifyBtn" class="btn" type="button">验证并进入</button>
+          </div>
           <div class="security-note">客户端加密开启后，D1 只保存密文；搜索会在本地浏览器里完成。忘记密码将无法恢复旧密文。</div>
           <div id="loginStatus" class="login-foot"></div>
         </div>
@@ -73,7 +78,24 @@
           </div>
         </section>
 
-        <main class="layout">
+        <section id="securityPanel" class="card security-panel hidden">
+          <div>
+            <h2 class="section-title">部署安全验证</h2>
+            <p id="securityPanelStatus" class="section-desc">整个部署共用一个 Authenticator。</p>
+          </div>
+          <div class="security-panel-actions">
+            <button id="enrollTotpBtn" class="btn secondary" type="button">绑定 Authenticator</button>
+            <button id="disableTotpBtn" class="btn danger" type="button">关闭二次验证</button>
+          </div>
+          <div id="totpEnrollmentPanel" class="totp-enrollment hidden">
+            <p class="field-help">请在 Authenticator 中添加下方密钥或扫描二维码内容；密钥和恢复码只显示一次。</p>
+            <code id="totpSecretLabel" class="totp-secret"></code>
+            <textarea id="totpRecoveryCodes" class="textarea recovery-codes" readonly></textarea>
+            <button id="confirmTotpBtn" class="btn" type="button">我已保存恢复码</button>
+          </div>
+        </section>
+
+        <main class="layout workspace-layout">
           <section class="card feed">
             <div class="section-head">
               <div>
@@ -83,6 +105,18 @@
               <div id="noteCount" class="muted">0 条</div>
             </div>
             <div id="noteList" class="note-list"></div>
+          </section>
+          <section id="readerView" class="card reader-view hidden" aria-live="polite">
+            <div class="reader-head">
+              <button id="readerBackBtn" class="btn secondary" type="button">返回列表</button>
+              <div id="readerMeta" class="section-desc"></div>
+              <button id="readerMoreBtn" class="btn secondary" type="button">更多</button>
+            </div>
+            <h2 id="readerTitle" class="reader-title"></h2>
+            <div id="readerContent" class="markdown-body"></div>
+            <div id="readerMoreMenu" class="more-menu hidden" role="menu">
+              <button id="readerDeleteBtn" class="btn danger" type="button" role="menuitem">删除笔记</button>
+            </div>
           </section>
         </main>
       </section>
@@ -99,7 +133,21 @@
         </div>
         <input id="editorTitle" class="input" placeholder="标题" />
         <div class="editor-spacer"></div>
+        <div id="editorToolbar" class="editor-toolbar" role="toolbar" aria-label="Markdown 工具栏">
+          <button class="btn secondary" type="button" data-markdown="## ">标题</button>
+          <button class="btn secondary" type="button" data-markdown="**">粗体</button>
+          <button class="btn secondary" type="button" data-markdown="*">斜体</button>
+          <button class="btn secondary" type="button" data-markdown="- ">列表</button>
+          <button class="btn secondary" type="button" data-markdown="> ">引用</button>
+          <button class="btn secondary" type="button" data-markdown="`">代码</button>
+          <button id="insertLinkBtn" class="btn secondary" type="button">链接</button>
+          <button id="insertImageBtn" class="btn secondary" type="button">图片</button>
+          <button id="togglePreviewBtn" class="btn secondary" type="button">预览</button>
+        </div>
+        <div id="attachmentDropZone" class="attachment-drop-zone" tabindex="0">将图片粘贴或拖到这里，图片会先在浏览器加密</div>
+        <div id="attachmentStatus" class="attachment-status" role="status"></div>
         <textarea id="editorContent" class="textarea" placeholder="# 今天想到什么&#10;&#10;- 一条记录&#10;- 一个链接&#10;- 一个待办"></textarea>
+        <div id="editorPreview" class="markdown-body editor-preview hidden"></div>
         <div class="modal-actions">
           <button id="cancelBtn" class="btn secondary">取消</button>
           <button id="saveBtn" class="btn">保存</button>

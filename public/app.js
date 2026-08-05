@@ -1,8 +1,10 @@
 import { encryptSharedPayload } from './share-crypto.js';
+import { renderMarkdown, extractAttachmentIds, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
+import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImage, revokeAttachmentUrls } from './attachment-crypto.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
- * @typedef {RawNote & { encrypted: boolean, decryptFailed: boolean }} Note
+ * @typedef {RawNote & { encrypted: boolean, decryptFailed: boolean, attachmentIds?: string[] }} Note
  * @typedef {{ vaultSalt: string, cipher: 'aes-gcm-256', kdf: 'pbkdf2-sha256', iterations: number, version: 1, keyCheck: string | null }} CryptoConfig
  */
 
@@ -27,7 +29,15 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * decryptFailedCount: number,
  * legacyPlaintextCount: number,
  * unlockError: string,
- * appShortName: string
+ * appShortName: string,
+ * readerNoteId: string | null,
+ * editorMode: 'source' | 'preview',
+ * attachmentUrls: Set<string>,
+ * pendingAttachmentIds: string[],
+ * pendingLoginChallenge: string | null,
+ * pendingLoginPassword: string,
+ * reauthRequired: boolean,
+ * idleTimer: number | null
  * }} */
 const state = {
   notes: [],
@@ -48,7 +58,15 @@ const state = {
   decryptFailedCount: 0,
   legacyPlaintextCount: 0,
   unlockError: '',
-  appShortName: document.documentElement.dataset.appShortName || '我的笔记'
+  appShortName: document.documentElement.dataset.appShortName || '我的笔记',
+  readerNoteId: null,
+  editorMode: 'source',
+  attachmentUrls: new Set(),
+  pendingAttachmentIds: [],
+  pendingLoginChallenge: null,
+  pendingLoginPassword: '',
+  reauthRequired: false,
+  idleTimer: null
 };
 /**
  * @param {string} id
@@ -99,6 +117,9 @@ const els = {
   loginBtn: getButton('loginBtn'),
   loginLogoutBtn: getButton('loginLogoutBtn'),
   loginStatus: getElement('loginStatus'),
+  totpChallengePanel: getElement('totpChallengePanel'),
+  totpCodeInput: getInput('totpCodeInput'),
+  totpVerifyBtn: getButton('totpVerifyBtn'),
   topbar: getElement('topbar'),
   searchInput: getInput('searchInput'),
   clearSearchBtn: getButton('clearSearchBtn'),
@@ -112,12 +133,35 @@ const els = {
   vaultPanelDesc: getElement('vaultPanelDesc'),
   vaultUnlockInput: getInput('vaultUnlockInput'),
   unlockBtn: getButton('unlockBtn'),
+  securityPanel: getElement('securityPanel'),
+  securityPanelStatus: getElement('securityPanelStatus'),
+  enrollTotpBtn: getButton('enrollTotpBtn'),
+  disableTotpBtn: getButton('disableTotpBtn'),
+  totpEnrollmentPanel: getElement('totpEnrollmentPanel'),
+  totpSecretLabel: getElement('totpSecretLabel'),
+  totpRecoveryCodes: getTextArea('totpRecoveryCodes'),
+  confirmTotpBtn: getButton('confirmTotpBtn'),
   noteCount: getElement('noteCount'),
   noteList: getElement('noteList'),
+  readerView: getElement('readerView'),
+  readerBackBtn: getButton('readerBackBtn'),
+  readerMeta: getElement('readerMeta'),
+  readerMoreBtn: getButton('readerMoreBtn'),
+  readerTitle: getElement('readerTitle'),
+  readerContent: getElement('readerContent'),
+  readerMoreMenu: getElement('readerMoreMenu'),
+  readerDeleteBtn: getButton('readerDeleteBtn'),
   editorModal: getElement('editorModal'),
   modalTitle: getElement('modalTitle'),
   editorTitle: getInput('editorTitle'),
   editorContent: getTextArea('editorContent'),
+  editorToolbar: getElement('editorToolbar'),
+  insertLinkBtn: getButton('insertLinkBtn'),
+  insertImageBtn: getButton('insertImageBtn'),
+  togglePreviewBtn: getButton('togglePreviewBtn'),
+  attachmentDropZone: getElement('attachmentDropZone'),
+  attachmentStatus: getElement('attachmentStatus'),
+  editorPreview: getElement('editorPreview'),
   closeModalBtn: getButton('closeModalBtn'),
   cancelBtn: getButton('cancelBtn'),
   saveBtn: getButton('saveBtn'),
@@ -176,6 +220,8 @@ function updateLoginMode() {
   els.loginLogoutBtn.classList.toggle('hidden', !unlockOnly);
   els.passwordInput.disabled = checking;
   els.loginBtn.disabled = checking;
+  els.totpChallengePanel.classList.toggle('hidden', !state.pendingLoginChallenge);
+  els.totpVerifyBtn.disabled = checking;
   if (checking) {
     els.loginTitle.textContent = '正在打开' + state.appShortName;
     els.loginDesc.textContent = '正在检查当前设备的访问状态，页面会保持在原位。';
@@ -184,7 +230,7 @@ function updateLoginMode() {
     els.loginBtn.textContent = '请稍候…';
     return;
   }
-  els.loginTitle.textContent = unlockOnly ? '解锁' + state.appShortName : '登录到' + state.appShortName;
+  els.loginTitle.textContent = state.pendingLoginChallenge ? '验证 Authenticator' : (unlockOnly ? '解锁' + state.appShortName : '登录到' + state.appShortName);
   els.loginDesc.textContent = unlockOnly
     ? '你已经通过访问验证。现在输入密码解锁本地加密内容；刷新后不会再出现页面跳转。'
     : '输入密码后即可进入应用，并在本地解锁你的加密笔记。';
@@ -192,7 +238,7 @@ function updateLoginMode() {
   els.passwordHelp.textContent = unlockOnly
     ? '密码只在本次页面会话中用于派生解密密钥，不再明文保存到 localStorage。'
     : '同一个密码同时用于访问站点和本地解密。';
-  els.loginBtn.textContent = unlockOnly ? '解锁' + state.appShortName : '进入笔记';
+  els.loginBtn.textContent = state.pendingLoginChallenge ? '等待验证码' : (unlockOnly ? '解锁' + state.appShortName : '进入笔记');
 }
 
 function updateVaultUi() {
@@ -233,6 +279,46 @@ function base64ToBytes(base64) {
 function clearSensitiveInputs() {
   els.passwordInput.value = '';
   els.vaultUnlockInput.value = '';
+  els.totpCodeInput.value = '';
+}
+
+function clearAttachmentUrls() {
+  revokeAttachmentUrls(state.attachmentUrls);
+}
+
+/** @param {'idle' | 'logout' | 'reauth_required'} reason */
+function lockVault(reason) {
+  if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
+  state.idleTimer = null;
+  clearAttachmentUrls();
+  state.vaultUnlocked = false;
+  state.vaultKey = null;
+  state.cryptoConfig = null;
+  state.readerNoteId = null;
+  els.readerView.classList.add('hidden');
+  closeComposer();
+  closeShareDialog(true);
+  clearSensitiveInputs();
+  if (reason === 'logout') state.sessionAuthenticated = false;
+  if (reason === 'reauth_required' || reason === 'idle') {
+    state.sessionAuthenticated = true;
+    state.reauthRequired = true;
+    state.authMode = 'unlock';
+  }
+  showLogin();
+  setStatus(reason === 'idle' ? '已锁定：超过 30 分钟无操作，请重新验证' : '需要重新验证');
+}
+
+function scheduleIdleLock() {
+  if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
+  if (!state.sessionAuthenticated || !state.vaultUnlocked) return;
+  state.idleTimer = window.setTimeout(function () {
+    lockVault('idle');
+  }, 30 * 60 * 1000);
+}
+
+function recordUserActivity() {
+  if (state.vaultUnlocked) scheduleIdleLock();
 }
 
 /**
@@ -476,8 +562,11 @@ function showApp() {
   if (state.sessionAuthenticated && state.vaultUnlocked) {
     els.loginView.classList.add('hidden');
     els.appView.classList.remove('app-dimmed');
+    els.securityPanel.classList.remove('hidden');
+    scheduleIdleLock();
   } else {
     showLogin();
+    els.securityPanel.classList.add('hidden');
   }
   updateVaultUi();
 }
@@ -563,6 +652,10 @@ async function api(url, options) {
   const res = await fetch(url, Object.assign({ credentials: 'same-origin' }, options || {}));
   const data = await res.json().catch(function () { return {}; });
   if (res.status === 401) {
+    if (data.error === 'reauth_required') {
+      lockVault('reauth_required');
+      throw new Error('需要重新验证');
+    }
     state.sessionAuthenticated = false;
     state.vaultUnlocked = false;
     state.vaultKey = null;
@@ -578,6 +671,7 @@ async function api(url, options) {
     }
     throw new Error(data.error || '请求失败');
   }
+  recordUserActivity();
   return data;
 }
 
@@ -679,7 +773,7 @@ function renderList() {
 
       const meta = document.createElement('div');
       meta.className = 'note-card-meta';
-      meta.innerHTML = '<span>' + formatDate(note.updated_at) + '</span><span>' + (note.decryptFailed ? '无法解密' : wordCount(note.content) + ' 字') + '</span>';
+      meta.innerHTML = '<span>创建 ' + formatDate(note.created_at) + '</span><span>更新 ' + formatDate(note.updated_at) + '</span>';
 
       const title = document.createElement('div');
       title.className = 'note-card-title';
@@ -720,16 +814,35 @@ function renderList() {
         openComposer(note);
       };
 
+      const moreWrap = document.createElement('div');
+      moreWrap.className = 'more-wrap';
+      const moreBtn = document.createElement('button');
+      moreBtn.type = 'button';
+      moreBtn.className = 'btn secondary more-trigger';
+      moreBtn.textContent = '更多';
+      moreBtn.setAttribute('aria-haspopup', 'menu');
+      const moreMenu = document.createElement('div');
+      moreMenu.className = 'more-menu hidden';
+      moreMenu.setAttribute('role', 'menu');
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.className = 'btn danger';
-      deleteBtn.textContent = '删除';
+      deleteBtn.textContent = '删除笔记';
       deleteBtn.disabled = note.decryptFailed;
-      deleteBtn.onclick = function () {
+      moreBtn.onclick = function (event) {
+        event.stopPropagation();
+        moreMenu.classList.toggle('hidden');
+      };
+      deleteBtn.onclick = function (event) {
+        event.stopPropagation();
+        moreMenu.classList.add('hidden');
         deleteNote(note.id).catch(function (error) {
           setStatus(error.message || '删除失败');
         });
       };
+      moreMenu.appendChild(deleteBtn);
+      moreWrap.appendChild(moreBtn);
+      moreWrap.appendChild(moreMenu);
 
       const body = document.createElement('div');
       const displayContent = getDisplayContent(note);
@@ -744,9 +857,13 @@ function renderList() {
       actions.appendChild(copyBtn);
       actions.appendChild(shareBtn);
       actions.appendChild(editBtn);
-      actions.appendChild(deleteBtn);
+      actions.appendChild(moreWrap);
       card.appendChild(title);
       card.appendChild(bodyWrap);
+      card.addEventListener('click', function (event) {
+        if (event.target instanceof HTMLElement && event.target.closest('button')) return;
+        openReader(note.id).catch(function (error) { setStatus(error.message || '打开笔记失败'); });
+      });
 
       if (displayContent.canExpand) {
         const toggleBtn = document.createElement('button');
@@ -791,9 +908,14 @@ async function refreshNotes() {
 /** @param {Note | null} note */
 function openComposer(note) {
   state.editingId = note ? note.id : null;
+  state.editorMode = 'source';
+  state.pendingAttachmentIds = [];
   els.modalTitle.textContent = note ? '编辑笔记' : '新建笔记';
   els.editorTitle.value = note ? note.title : '';
   els.editorContent.value = note ? note.content : '';
+  els.editorContent.classList.remove('hidden');
+  els.editorPreview.classList.add('hidden');
+  els.attachmentStatus.textContent = '';
   els.editorModal.classList.remove('hidden');
   updateModalUi();
   els.editorTitle.focus();
@@ -802,7 +924,79 @@ function openComposer(note) {
 function closeComposer() {
   els.editorModal.classList.add('hidden');
   state.editingId = null;
+  state.pendingAttachmentIds = [];
+  els.attachmentStatus.textContent = '';
   updateModalUi();
+}
+
+/** @param {string} noteId */
+async function openReader(noteId) {
+  const note = state.allNotes.find(function (item) { return item.id === noteId; });
+  if (!note || note.decryptFailed) throw new Error('找不到可阅读的笔记');
+  if (!state.vaultKey) throw new Error('请先解锁内容');
+  const vaultKey = state.vaultKey;
+  clearAttachmentUrls();
+  state.readerNoteId = noteId;
+  els.readerTitle.textContent = note.title || '无标题';
+  els.readerMeta.textContent = '创建 ' + formatDate(note.created_at) + ' · 更新 ' + formatDate(note.updated_at);
+  els.readerContent.replaceChildren();
+  els.readerView.classList.remove('hidden');
+  const attachmentMap = new Map();
+  const ids = extractAttachmentIds(note.content || '');
+  if (ids.length) {
+    const listed = await api('/api/attachments?noteId=' + encodeURIComponent(note.id));
+    const allowed = new Map((/** @type {Array<{ id: string, mime_type: string }>} */ (listed.attachments || [])).map(function (item) { return [item.id, item]; }));
+    for (const id of ids) {
+      const metadata = allowed.get(id);
+      if (!metadata) continue;
+      try {
+        const response = await fetch('/api/attachments/' + encodeURIComponent(id), { credentials: 'same-origin' });
+        if (!response.ok) throw new Error('attachment unavailable');
+        const blob = await decryptAttachment(await response.arrayBuffer(), metadata.mime_type, vaultKey);
+        const url = URL.createObjectURL(blob);
+        state.attachmentUrls.add(url);
+        attachmentMap.set(id, url);
+      } catch {
+        // Text remains visible; an unavailable image is simply omitted.
+      }
+    }
+  }
+  els.readerContent.append(renderMarkdown(note.content || '', attachmentMap));
+}
+
+function closeReader() {
+  clearAttachmentUrls();
+  state.readerNoteId = null;
+  els.readerView.classList.add('hidden');
+  els.readerMoreMenu.classList.add('hidden');
+}
+
+function updateEditorPreview() {
+  els.editorPreview.replaceChildren(renderMarkdown(els.editorContent.value, new Map()));
+}
+
+/** @param {File} file */
+async function uploadEditorImage(file) {
+  if (!state.editingId || !state.vaultKey) {
+    els.attachmentStatus.textContent = '请先保存一条笔记，再向已有笔记添加图片。';
+    return;
+  }
+  els.attachmentStatus.textContent = '正在浏览器加密并上传图片…';
+  const encrypted = await encryptAttachment(file, state.vaultKey);
+  const response = await api('/api/attachments', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/octet-stream',
+      'x-note-id': state.editingId,
+      'x-mime-type': encrypted.mimeType,
+      'content-length': String(encrypted.byteLength)
+    },
+    body: encrypted.ciphertext
+  });
+  const id = String(response.attachment.id);
+  state.pendingAttachmentIds.push(id);
+  els.editorContent.value = replaceAttachmentReference(els.editorContent.value, id, '图片');
+  els.attachmentStatus.textContent = '图片已加密上传，保存笔记后完成关联。';
 }
 
 async function saveComposer() {
@@ -836,14 +1030,15 @@ async function saveComposer() {
       body: JSON.stringify({
         title: encryptedTitle,
         content: encryptedContent,
-        revision: currentNote.revision
+        revision: currentNote.revision,
+        attachmentIds: state.pendingAttachmentIds
       })
     });
   } else {
     data = await api('/api/notes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: encryptedTitle, content: encryptedContent })
+      body: JSON.stringify({ title: encryptedTitle, content: encryptedContent, attachmentIds: state.pendingAttachmentIds })
     });
   }
 
@@ -1108,11 +1303,100 @@ async function unlockVault(passphrase, allowKeyCheckInit) {
   }
 }
 
+/** @param {string} password */
+async function beginTwoFactorLogin(password) {
+  const data = await api('/api/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: password })
+  });
+  if (data.code !== 'two_factor_required' || typeof data.challengeId !== 'string') throw new Error('服务器未返回有效的二次验证挑战');
+  state.pendingLoginChallenge = data.challengeId;
+  state.pendingLoginPassword = password;
+  updateLoginMode();
+  els.totpCodeInput.focus();
+}
+
+async function verifyPendingTotp() {
+  if (!state.pendingLoginChallenge || !state.pendingLoginPassword) throw new Error('二次验证挑战已失效，请重新登录');
+  const data = await api('/api/login/totp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: els.totpCodeInput.value.trim() })
+  });
+  if (!data.ok) throw new Error('验证码无效');
+  const password = state.pendingLoginPassword;
+  state.pendingLoginChallenge = null;
+  state.pendingLoginPassword = '';
+  state.sessionAuthenticated = true;
+  await unlockVault(password, true);
+  clearSensitiveInputs();
+  showApp();
+  setStatus('已通过 Authenticator 验证');
+}
+
+async function enrollTotp() {
+  const password = window.prompt('请输入当前密码以绑定 Authenticator');
+  if (!password) return;
+  const data = await api('/api/auth/totp/enroll', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: password })
+  });
+  els.totpSecretLabel.textContent = String(data.secret || '');
+  els.totpRecoveryCodes.value = '';
+  els.totpEnrollmentPanel.classList.remove('hidden');
+  els.securityPanelStatus.textContent = '请先在 Authenticator 中添加密钥，再输入当前验证码确认。';
+  state.pendingLoginPassword = String(data.secret || '');
+}
+
+async function confirmTotpEnrollment() {
+  const code = window.prompt('请输入 Authenticator 当前验证码');
+  if (!code) return;
+  const data = await api('/api/auth/totp/confirm', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: code })
+  });
+  els.totpRecoveryCodes.value = Array.isArray(data.recoveryCodes) ? data.recoveryCodes.join('\n') : '';
+  els.securityPanelStatus.textContent = '二次验证已启用；请妥善保存恢复码。';
+  els.enrollTotpBtn.classList.add('hidden');
+}
+
+async function disableTotp() {
+  const password = window.prompt('请输入当前密码');
+  const code = window.prompt('请输入 Authenticator 当前验证码');
+  if (!password || !code) return;
+  await api('/api/auth/totp/disable', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: password, code: code })
+  });
+  els.securityPanelStatus.textContent = '二次验证已关闭。';
+  els.enrollTotpBtn.classList.remove('hidden');
+  setStatus('已关闭二次验证');
+}
+
+/** @param {string} password @param {string} code */
+async function submitReauth(password, code) {
+  await api('/api/auth/reauth', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: password, code: code || undefined })
+  });
+  state.reauthRequired = false;
+  state.sessionAuthenticated = true;
+  await unlockVault(password, false);
+  showApp();
+  setStatus('重新验证成功');
+}
+
 async function checkSession() {
   showChecking();
   const data = await api('/api/session');
   if (data.authenticated) {
     state.sessionAuthenticated = true;
+    state.reauthRequired = Boolean(data.reauthRequired);
     state.vaultUnlocked = false;
     state.vaultKey = null;
     state.unlockError = '';
@@ -1122,6 +1406,7 @@ async function checkSession() {
     renderList();
   } else {
     state.sessionAuthenticated = false;
+    state.reauthRequired = false;
     state.vaultUnlocked = false;
     state.vaultKey = null;
     state.unlockError = '';
@@ -1132,18 +1417,35 @@ async function checkSession() {
 
 els.loginBtn.onclick = async function () {
   try {
+    if (state.pendingLoginChallenge) {
+      await verifyPendingTotp();
+      return;
+    }
     const unlockOnly = state.sessionAuthenticated && !state.vaultUnlocked;
     let performedLogin = false;
     els.loginStatus.textContent = unlockOnly ? '解锁中…' : '登录中…';
     const password = els.passwordInput.value;
     if (!password) throw new Error('请输入密码');
     if (!unlockOnly) {
-      await api('/api/login', {
+      const loginData = await api('/api/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ password: password })
       });
+      if (loginData.code === 'two_factor_required') {
+        state.pendingLoginChallenge = String(loginData.challengeId || '');
+        state.pendingLoginPassword = password;
+        updateLoginMode();
+        els.totpCodeInput.focus();
+        els.loginStatus.textContent = '请输入 Authenticator 验证码';
+        return;
+      }
       performedLogin = true;
+    } else if (state.reauthRequired) {
+      const code = window.prompt('请输入 Authenticator 当前验证码或恢复码') || '';
+      await submitReauth(password, code);
+      clearSensitiveInputs();
+      return;
     }
     state.sessionAuthenticated = true;
     await unlockVault(password, performedLogin);
@@ -1176,6 +1478,15 @@ els.loginBtn.onclick = async function () {
 els.vaultUnlockInput.addEventListener('keydown', function (event) {
   if (event.key === 'Enter') els.unlockBtn.click();
 });
+
+els.totpCodeInput.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') els.totpVerifyBtn.click();
+});
+els.totpVerifyBtn.onclick = function () {
+  verifyPendingTotp().catch(function (error) {
+    els.loginStatus.textContent = error instanceof Error ? error.message : '验证码无效';
+  });
+};
 
 els.searchBtn.onclick = function () {
   applySearch();
@@ -1226,6 +1537,7 @@ els.fabTopBtn.onclick = function () {
 
 async function logout() {
   await api('/api/logout', { method: 'POST' });
+  clearAttachmentUrls();
   closeComposer();
   closeShareDialog(true);
   state.notes = [];
@@ -1237,6 +1549,9 @@ async function logout() {
   state.noteCountMeta = 0;
   state.decryptFailedCount = 0;
   state.legacyPlaintextCount = 0;
+  state.reauthRequired = false;
+  state.pendingLoginChallenge = null;
+  state.pendingLoginPassword = '';
   clearSensitiveInputs();
   state.unlockError = '';
   els.loginStatus.textContent = '';
@@ -1256,6 +1571,63 @@ els.loginLogoutBtn.onclick = function () {
     els.loginStatus.textContent = error instanceof Error ? error.message : '退出失败';
   });
 };
+
+els.readerBackBtn.onclick = closeReader;
+els.readerMoreBtn.onclick = function () {
+  els.readerMoreMenu.classList.toggle('hidden');
+};
+els.readerDeleteBtn.onclick = function () {
+  if (!state.readerNoteId) return;
+  deleteNote(state.readerNoteId).then(closeReader).catch(function (error) { setStatus(error.message || '删除失败'); });
+};
+els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { setStatus(error.message || '绑定失败'); }); };
+els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };
+els.disableTotpBtn.onclick = function () { disableTotp().catch(function (error) { setStatus(error.message || '关闭失败'); }); };
+
+els.editorToolbar.querySelectorAll('[data-markdown]').forEach(function (button) {
+  button.addEventListener('click', function () {
+    const insertion = button.getAttribute('data-markdown') || '';
+    insertMarkdownAtSelection(els.editorContent, insertion);
+    els.editorContent.focus();
+  });
+});
+els.togglePreviewBtn.onclick = function () {
+  state.editorMode = state.editorMode === 'source' ? 'preview' : 'source';
+  const preview = state.editorMode === 'preview';
+  els.editorContent.classList.toggle('hidden', preview);
+  els.editorPreview.classList.toggle('hidden', !preview);
+  els.togglePreviewBtn.textContent = preview ? '编辑源码' : '预览';
+  if (preview) updateEditorPreview();
+};
+els.editorContent.addEventListener('input', function () {
+  if (state.editorMode === 'preview') updateEditorPreview();
+});
+els.insertLinkBtn.onclick = function () {
+  const url = window.prompt('输入 https/http 链接');
+  if (url) insertMarkdownAtSelection(els.editorContent, '[链接](' + url + ')');
+  els.editorContent.focus();
+};
+els.insertImageBtn.onclick = function () {
+  els.attachmentDropZone.focus();
+  setStatus('请将图片粘贴或拖入编辑区');
+};
+els.attachmentDropZone.addEventListener('paste', function (event) {
+  const image = extractPastedImage(event);
+  if (!image) return;
+  event.preventDefault();
+  uploadEditorImage(image).catch(function (error) { els.attachmentStatus.textContent = error.message || '图片上传失败'; });
+});
+els.attachmentDropZone.addEventListener('dragover', function (event) {
+  event.preventDefault();
+  els.attachmentDropZone.classList.add('drag-over');
+});
+els.attachmentDropZone.addEventListener('dragleave', function () { els.attachmentDropZone.classList.remove('drag-over'); });
+els.attachmentDropZone.addEventListener('drop', function (event) {
+  event.preventDefault();
+  els.attachmentDropZone.classList.remove('drag-over');
+  const image = extractDroppedImage(event);
+  if (image) uploadEditorImage(image).catch(function (error) { els.attachmentStatus.textContent = error.message || '图片上传失败'; });
+});
 
 els.closeModalBtn.onclick = closeComposer;
 els.cancelBtn.onclick = closeComposer;
@@ -1310,6 +1682,9 @@ document.addEventListener('keydown', function (event) {
       closeShareDialog();
     } else if (!els.editorModal.classList.contains('hidden')) {
       closeComposer();
+    } else if (!els.readerMoreMenu.classList.contains('hidden')) {
+      els.readerMoreMenu.classList.add('hidden');
+      els.readerMoreBtn.focus();
     }
   }
   const isSave = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's';
@@ -1322,6 +1697,13 @@ document.addEventListener('keydown', function (event) {
 });
 
 window.addEventListener('scroll', updateScrollUi, { passive: true });
+
+['pointerdown', 'keydown', 'touchstart'].forEach(function (eventName) {
+  document.addEventListener(eventName, recordUserActivity, { passive: true });
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') recordUserActivity();
+});
 
 updateSearchUi();
 updateScrollUi();
