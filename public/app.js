@@ -44,7 +44,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * folders: Array<{ id: string, name: string, created_at: number, updated_at: number }>,
  * folderMap: Map<string, { id: string, name: string, created_at: number, updated_at: number }>,
  * activeCategory: 'all' | 'note' | 'password',
- * activeFolderId: string | null
+ * activeFolderId: string | null | undefined
  * }} */
 const state = {
   notes: [],
@@ -79,7 +79,7 @@ const state = {
   folders: [],
   folderMap: new Map(),
   activeCategory: 'all',
-  activeFolderId: null
+  activeFolderId: undefined
 };
 /**
  * @param {string} id
@@ -304,7 +304,7 @@ function clearFolderState() {
   state.folders = [];
   state.folderMap = new Map();
   state.activeCategory = 'all';
-  state.activeFolderId = null;
+  state.activeFolderId = undefined;
 }
 
 /** @param {'idle' | 'logout' | 'reauth_required'} reason */
@@ -595,7 +595,7 @@ async function refreshFolders() {
   state.encryptedFolders = sortFolders(encryptedFolders);
   state.folders = sortFolders(folders);
   state.folderMap = new Map(state.folders.map(function (folder) { return [folder.id, folder]; }));
-  if (state.activeFolderId && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = null;
+  if (state.activeFolderId && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = undefined;
   applySearch();
 }
 

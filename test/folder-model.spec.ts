@@ -21,6 +21,15 @@ describe('folder model', () => {
 		expect(resolveFolderName(folders, 'deleted-folder')).toBe('未分类');
 	});
 
+	it('keeps categorized and uncategorized notes in the default all-folder selection', () => {
+		const folders = new Map([['folder-1', { id: 'folder-1', name: '工作' }]]);
+		const uncategorized = { content: 'Legacy note' };
+		const categorized = { content: JSON.stringify({ v: 1, type: 'note', folderId: 'folder-1', markdown: 'Structured' }) };
+
+		expect(matchesNoteFilter(uncategorized, 'all', undefined, folders)).toBe(true);
+		expect(matchesNoteFilter(categorized, 'all', undefined, folders)).toBe(true);
+	});
+
 	it('filters legacy, structured, and password records by category and resolved folder', () => {
 		const folders = new Map([['folder-1', { id: 'folder-1', name: '工作' }]]);
 		const legacy = { content: '# Legacy note' };

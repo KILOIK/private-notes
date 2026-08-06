@@ -22,12 +22,13 @@ export function resolveFolderName(folderMap, folderId) {
 /**
  * @param {{ content: string }} note
  * @param {'all' | 'note' | 'password'} category
- * @param {string | null} folderId
+ * @param {string | null | undefined} folderId
  * @param {Map<string, DisplayFolder>} folderMap
  */
 export function matchesNoteFilter(note, category, folderId, folderMap) {
   const record = decodeNoteRecord(note.content);
   if (category !== 'all' && record.type !== category) return false;
+  if (folderId === undefined) return true;
   if (folderId === null) return resolveFolderName(folderMap, record.folderId) === UNCATEGORIZED_FOLDER_NAME;
   return record.folderId === folderId && folderMap.has(folderId);
 }
