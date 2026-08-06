@@ -7,6 +7,13 @@ import {
 	normalizePasswordFields,
 } from '../public/note-records.js';
 
+type PasswordField = {
+	id: string;
+	type: 'text' | 'secret' | 'multiline';
+	label: string;
+	value: string;
+};
+
 describe('note record codecs', () => {
 	it('decodes legacy Markdown as a v1 note record', () => {
 		const record = decodeNoteRecord('# Hello\n\nLegacy');
@@ -28,7 +35,7 @@ describe('note record codecs', () => {
 			{ id: 'name', type: 'text', label: '', value: 'Alice' },
 			{ id: 'username', type: 'text', label: '', value: '' },
 		]);
-		expect(fields.map((field) => field.id)).toEqual(['name', 'username', 'password', 'url', 'notes', 'custom']);
+		expect(fields.map((field: PasswordField) => field.id)).toEqual(['name', 'username', 'password', 'url', 'notes', 'custom']);
 		expect(fields.slice(0, 5)).toEqual([
 			{ id: 'name', type: 'text', label: '名称', value: 'Alice' },
 			{ id: 'username', type: 'text', label: '用户名', value: '' },
