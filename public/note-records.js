@@ -1,12 +1,12 @@
 const RECORD_VERSION = 1;
 const FIXED_PASSWORD_IDS = ['name', 'username', 'password', 'url', 'notes'];
-const FIELD_TYPES = new Set(['text', 'secret', 'url', 'multiline']);
+const FIELD_TYPES = new Set(['text', 'secret', 'multiline']);
 const FIXED_DEFAULTS = {
-  name: { type: 'text', label: 'Name' },
-  username: { type: 'text', label: 'Username' },
-  password: { type: 'secret', label: 'Password' },
-  url: { type: 'url', label: 'URL' },
-  notes: { type: 'multiline', label: 'Notes' },
+  name: { type: 'text', label: '名称' },
+  username: { type: 'text', label: '用户名' },
+  password: { type: 'secret', label: '密码' },
+  url: { type: 'text', label: '网址' },
+  notes: { type: 'multiline', label: '备注' },
 };
 
 /** @param {any} value @returns {any} */
@@ -58,16 +58,15 @@ export function normalizePasswordFields(fields) {
 export function decodeNoteRecord(content) {
   if (typeof content !== 'string') throw new TypeError('record content must be a string');
   let parsed;
-  try { parsed = JSON.parse(content); } catch { return { v: 1, type: 'note', folderId: null, markdown: content }; }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { v: 1, type: 'note', folderId: null, markdown: content };
-  if (!Object.prototype.hasOwnProperty.call(parsed, 'v')) return { v: 1, type: 'note', folderId: null, markdown: content };
+  try { parsed = JSON.parse(content); } catch { return immutable({ v: 1, type: 'note', folderId: null, markdown: content }); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return immutable({ v: 1, type: 'note', folderId: null, markdown: content });
   requireVersion(parsed);
   if (parsed.type === 'note') {
     if (typeof parsed.markdown !== 'string') throw new Error('invalid note markdown');
     return immutable({ v: 1, type: 'note', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, markdown: parsed.markdown });
   }
   if (parsed.type === 'password') {
-    return immutable({ v: 1, type: 'password', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, title: String(parsed.title || ''), fields: normalizePasswordFields(parsed.fields) });
+    return immutable({ v: 1, type: 'password', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, fields: normalizePasswordFields(parsed.fields) });
   }
   throw new Error('unknown record type');
 }
@@ -81,7 +80,7 @@ export function encodeNoteRecord(record) {
 /** @param {any} record */
 export function encodePasswordRecord(record) {
   if (!record || typeof record !== 'object' || record.type !== 'password') throw new Error('invalid password record');
-  const result = { v: 1, type: 'password', folderId: typeof record.folderId === 'string' ? record.folderId : null, title: String(record.title || ''), fields: normalizePasswordFields(record.fields) };
+  const result = { v: 1, type: 'password', folderId: typeof record.folderId === 'string' ? record.folderId : null, fields: normalizePasswordFields(record.fields) };
   return JSON.stringify(result);
 }
 
@@ -89,6 +88,8 @@ export function encodePasswordRecord(record) {
 export function buildNoteSnippet(record, maxLength = 140) {
   const markdown = typeof record === 'string' ? record : String(record?.markdown || '');
   const plain = markdown
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]*>/g, '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
@@ -98,7 +99,8 @@ export function buildNoteSnippet(record, maxLength = 140) {
     .replace(/\s+/g, ' ')
     .trim();
   const limit = Math.max(0, Number.isFinite(maxLength) ? Math.floor(maxLength) : 140);
-  if (plain.length <= limit) return plain;
+  const characters = Array.from(plain);
+  if (characters.length <= limit) return plain;
   if (limit <= 1) return '…'.slice(0, limit);
-  return plain.slice(0, limit - 1) + '…';
+  return characters.slice(0, limit - 1).join('') + '…';
 }

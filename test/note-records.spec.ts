@@ -9,7 +9,9 @@ import {
 
 describe('note record codecs', () => {
 	it('decodes legacy Markdown as a v1 note record', () => {
-		expect(decodeNoteRecord('# Hello\n\nLegacy')).toEqual({ v: 1, type: 'note', folderId: null, markdown: '# Hello\n\nLegacy' });
+		const record = decodeNoteRecord('# Hello\n\nLegacy');
+		expect(record).toEqual({ v: 1, type: 'note', folderId: null, markdown: '# Hello\n\nLegacy' });
+		expect(Object.isFrozen(record)).toBe(true);
 	});
 
 	it('round trips a structured note record', () => {
@@ -19,14 +21,21 @@ describe('note record codecs', () => {
 
 	it('normalizes fixed password fields before custom fields', () => {
 		const fields = normalizePasswordFields([
-			{ id: 'url', type: 'url', label: 'URL', value: 12 },
+			{ id: 'url', type: 'text', label: '', value: 12 },
 			{ id: 'custom', type: 'text', label: 'Token', value: 99 },
-			{ id: 'name', type: 'text', label: 'Name', value: 'Alice' },
+			{ id: 'notes', type: 'multiline', label: '', value: '' },
+			{ id: 'password', type: 'secret', label: '', value: '' },
+			{ id: 'name', type: 'text', label: '', value: 'Alice' },
+			{ id: 'username', type: 'text', label: '', value: '' },
 		]);
 		expect(fields.map((field) => field.id)).toEqual(['name', 'username', 'password', 'url', 'notes', 'custom']);
-		expect(fields[0]).toMatchObject({ id: 'name', value: 'Alice' });
-		expect(fields[1]).toMatchObject({ id: 'username', value: '' });
-		expect(fields[3]).toMatchObject({ id: 'url', value: '12' });
+		expect(fields.slice(0, 5)).toEqual([
+			{ id: 'name', type: 'text', label: '名称', value: 'Alice' },
+			{ id: 'username', type: 'text', label: '用户名', value: '' },
+			{ id: 'password', type: 'secret', label: '密码', value: '' },
+			{ id: 'url', type: 'text', label: '网址', value: '12' },
+			{ id: 'notes', type: 'multiline', label: '备注', value: '' },
+		]);
 		expect(Object.isFrozen(fields)).toBe(true);
 		expect(Object.isFrozen(fields[0])).toBe(true);
 	});
@@ -37,6 +46,14 @@ describe('note record codecs', () => {
 			{ id: 'name', type: 'unknown', label: 'Name', value: '' },
 		])).toThrow(/field type/i);
 		expect(() => normalizePasswordFields([
+			{ id: 'name', type: 'text', label: '', value: '' },
+			{ id: 'username', type: 'text', label: '', value: '' },
+			{ id: 'password', type: 'secret', label: '', value: '' },
+			{ id: 'url', type: 'text', label: '', value: '' },
+			{ id: 'notes', type: 'multiline', label: '', value: '' },
+			{ id: 'custom', type: 'url', label: 'Website', value: '' },
+		])).toThrow(/field type/i);
+		expect(() => normalizePasswordFields([
 			{ id: 'name', type: 'text', label: 'Name', value: '' },
 			{ id: 'custom', type: 'text', label: ' ', value: '' },
 		])).toThrow(/label/i);
@@ -45,22 +62,36 @@ describe('note record codecs', () => {
 			{ id: 'name', type: 'text', label: 'Duplicate', value: '' },
 		])).toThrow(/duplicate/i);
 		expect(() => decodeNoteRecord(JSON.stringify({ v: 2, type: 'note', markdown: '' }))).toThrow(/version/i);
+		expect(() => decodeNoteRecord(JSON.stringify({ type: 'note', markdown: '' }))).toThrow(/version/i);
 	});
 
-	it('encodes password records with normalized immutable fields', () => {
-		const encoded = encodePasswordRecord({ type: 'password', title: 'Example', fields: [
-			{ id: 'name', type: 'text', label: 'Name', value: 'A' },
-			{ id: 'username', type: 'text', label: 'Username', value: 'u' },
-			{ id: 'password', type: 'secret', label: 'Password', value: 'p' },
-			{ id: 'url', type: 'url', label: 'URL', value: '' },
-			{ id: 'notes', type: 'multiline', label: 'Notes', value: '' },
+	it('encodes password records without a duplicate title property', () => {
+		const encoded = encodePasswordRecord({ type: 'password', folderId: 'folder-1', title: 'Ignored', fields: [
+			{ id: 'name', type: 'text', label: '名称', value: 'A' },
+			{ id: 'username', type: 'text', label: '用户名', value: 'u' },
+			{ id: 'password', type: 'secret', label: '密码', value: 'p' },
+			{ id: 'url', type: 'text', label: '网址', value: '' },
+			{ id: 'notes', type: 'multiline', label: '备注', value: '' },
 		] });
-		const decoded = decodeNoteRecord(encoded);
-		expect(decoded).toMatchObject({ v: 1, type: 'password', title: 'Example' });
+		expect(Object.keys(JSON.parse(encoded))).toEqual(['v', 'type', 'folderId', 'fields']);
+		expect(decodeNoteRecord(encoded)).toEqual({
+			v: 1,
+			type: 'password',
+			folderId: 'folder-1',
+			fields: [
+				{ id: 'name', type: 'text', label: '名称', value: 'A' },
+				{ id: 'username', type: 'text', label: '用户名', value: 'u' },
+				{ id: 'password', type: 'secret', label: '密码', value: 'p' },
+				{ id: 'url', type: 'text', label: '网址', value: '' },
+				{ id: 'notes', type: 'multiline', label: '备注', value: '' },
+			],
+		});
 	});
 
 	it('builds a plain text character-limited Markdown snippet', () => {
 		expect(buildNoteSnippet({ markdown: '# Hello **world**\n\n[link](https://example.com) and `code`' }, 10)).toBe('Hello wor…');
-		expect(buildNoteSnippet({ markdown: '<img src=x onerror=alert(1)>safe' }, 20)).not.toContain('<img');
+		expect(buildNoteSnippet({ markdown: '<img src=x onerror=alert(1)>safe' }, 20)).toBe('safe');
+		expect(buildNoteSnippet({ markdown: '😀😀😀' }, 3)).toBe('😀😀😀');
+		expect(buildNoteSnippet({ markdown: '😀😀😀' }, 2)).toBe('😀…');
 	});
 });
