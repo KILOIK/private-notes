@@ -45,6 +45,8 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * folderMap: Map<string, { id: string, name: string, created_at: number, updated_at: number }>,
  * activeCategory: 'all' | 'note' | 'password',
  * activeFolderId: string | null | undefined
+ * settingsReturnFocus: HTMLElement | null
+ * folderReturnFocus: HTMLElement | null
  * }} */
 const state = {
   notes: [],
@@ -79,7 +81,9 @@ const state = {
   folders: [],
   folderMap: new Map(),
   activeCategory: 'all',
-  activeFolderId: undefined
+  activeFolderId: undefined,
+  settingsReturnFocus: null,
+  folderReturnFocus: null
 };
 /**
  * @param {string} id
@@ -140,7 +144,10 @@ const els = {
   newBtn: getButton('newBtn'),
   fabNewBtn: getButton('fabNewBtn'),
   fabTopBtn: getButton('fabTopBtn'),
-  logoutBtn: getButton('logoutBtn'),
+  settingsBtn: getButton('settingsBtn'),
+  closeSettingsBtn: getButton('closeSettingsBtn'),
+  settingsPanel: getElement('settingsPanel'),
+  settingsLogoutBtn: getButton('settingsLogoutBtn'),
   statusLine: getElement('statusLine'),
   vaultPanel: getElement('vaultPanel'),
   vaultPanelDesc: getElement('vaultPanelDesc'),
@@ -162,11 +169,13 @@ const els = {
   readerMoreBtn: getButton('readerMoreBtn'),
   readerTitle: getElement('readerTitle'),
   readerContent: getElement('readerContent'),
+  passwordFields: getElement('passwordFields'),
   readerMoreMenu: getElement('readerMoreMenu'),
   readerDeleteBtn: getButton('readerDeleteBtn'),
   editorModal: getElement('editorModal'),
   modalTitle: getElement('modalTitle'),
   editorTitle: getInput('editorTitle'),
+  passwordEditorFields: getElement('passwordEditorFields'),
   editorContent: getTextArea('editorContent'),
   editorToolbar: getElement('editorToolbar'),
   insertLinkBtn: getButton('insertLinkBtn'),
@@ -174,6 +183,7 @@ const els = {
   togglePreviewBtn: getButton('togglePreviewBtn'),
   attachmentDropZone: getElement('attachmentDropZone'),
   attachmentStatus: getElement('attachmentStatus'),
+  mobilePasteStatus: getElement('mobilePasteStatus'),
   editorPreview: getElement('editorPreview'),
   closeModalBtn: getButton('closeModalBtn'),
   cancelBtn: getButton('cancelBtn'),
@@ -188,7 +198,15 @@ const els = {
   closeShareModalBtn: getButton('closeShareModalBtn'),
   cancelShareBtn: getButton('cancelShareBtn'),
   createShareBtn: getButton('createShareBtn'),
-  copyShareLinkBtn: getButton('copyShareLinkBtn')
+  copyShareLinkBtn: getButton('copyShareLinkBtn'),
+  categoryNav: getElement('categoryNav'),
+  folderNav: getElement('folderNav'),
+  folderDialog: getElement('folderDialog'),
+  manageFoldersBtn: getButton('manageFoldersBtn'),
+  closeFolderDialogBtn: getButton('closeFolderDialogBtn'),
+  cancelFolderBtn: getButton('cancelFolderBtn'),
+  folderNameInput: getInput('folderNameInput'),
+  saveFolderBtn: getButton('saveFolderBtn')
 };
 
 /** @param {string} text */
@@ -217,13 +235,81 @@ function updateScrollUi() {
 }
 
 function updateModalUi() {
-  const open = !els.editorModal.classList.contains('hidden') || !els.shareModal.classList.contains('hidden');
+  const open = !els.editorModal.classList.contains('hidden') || !els.shareModal.classList.contains('hidden') || !els.folderDialog.classList.contains('hidden');
   [els.topbar, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
     element.classList.toggle('modal-obscured', open);
   });
   [els.loginView, els.appView, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
     element.inert = open;
   });
+}
+
+function openSettings() {
+  state.settingsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  els.settingsPanel.classList.remove('hidden');
+  els.settingsPanel.setAttribute('aria-hidden', 'false');
+  els.settingsBtn.setAttribute('aria-expanded', 'true');
+  els.settingsPanel.focus();
+}
+
+function closeSettings() {
+  els.settingsPanel.classList.add('hidden');
+  els.settingsPanel.setAttribute('aria-hidden', 'true');
+  els.settingsBtn.setAttribute('aria-expanded', 'false');
+  const returnFocus = state.settingsReturnFocus;
+  state.settingsReturnFocus = null;
+  if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+}
+
+function openFolderDialog() {
+  state.folderReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  els.folderDialog.classList.remove('hidden');
+  els.folderDialog.setAttribute('aria-hidden', 'false');
+  updateModalUi();
+  els.folderNameInput.focus();
+}
+
+function closeFolderDialog() {
+  els.folderDialog.classList.add('hidden');
+  els.folderDialog.setAttribute('aria-hidden', 'true');
+  els.folderNameInput.value = '';
+  updateModalUi();
+  const returnFocus = state.folderReturnFocus;
+  state.folderReturnFocus = null;
+  if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+}
+
+function renderFilterNav() {
+  els.categoryNav.querySelectorAll('[data-category]').forEach(function (element) {
+    const button = /** @type {HTMLButtonElement} */ (element);
+    const active = button.dataset.category === state.activeCategory;
+    button.classList.toggle('is-active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+  els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) {
+    const button = /** @type {HTMLButtonElement} */ (element);
+    const id = button.dataset.folderId || '';
+    const active = (id === '' && state.activeFolderId === undefined)
+      || (id === '__uncategorized__' && state.activeFolderId === null)
+      || (id !== '' && id !== '__uncategorized__' && id === state.activeFolderId);
+    button.classList.toggle('is-active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+}
+
+function renderFolders() {
+  els.folderNav.querySelectorAll('[data-folder-id]:not([data-folder-id=""]):not([data-folder-id="__uncategorized__"])').forEach(function (element) { element.remove(); });
+  state.folders.forEach(function (folder) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'folder-chip';
+    button.dataset.folderId = folder.id;
+    button.textContent = folder.name;
+    els.folderNav.appendChild(button);
+  });
+  renderFilterNav();
 }
 
 function updateLoginMode() {
@@ -319,6 +405,8 @@ function lockVault(reason) {
   state.readerNoteId = null;
   els.readerView.classList.add('hidden');
   closeComposer();
+  closeSettings();
+  closeFolderDialog();
   closeShareDialog(true);
   clearSensitiveInputs();
   if (reason === 'logout') state.sessionAuthenticated = false;
@@ -596,6 +684,7 @@ async function refreshFolders() {
   state.folders = sortFolders(folders);
   state.folderMap = new Map(state.folders.map(function (folder) { return [folder.id, folder]; }));
   if (state.activeFolderId && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = undefined;
+  renderFolders();
   applySearch();
 }
 
@@ -625,6 +714,7 @@ function applySearch() {
     }
   });
   renderList();
+  renderFilterNav();
 }
 
 function showLogin() {
@@ -654,6 +744,34 @@ function showApp() {
   }
   updateVaultUi();
 }
+
+els.settingsBtn.onclick = openSettings;
+els.closeSettingsBtn.onclick = closeSettings;
+els.settingsLogoutBtn.onclick = function () {
+  logout().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '退出失败');
+  });
+};
+
+els.categoryNav.addEventListener('click', function (event) {
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-category]') : null;
+  if (!(target instanceof HTMLButtonElement)) return;
+  const category = target.dataset.category;
+  if (category !== 'all' && category !== 'note' && category !== 'password') return;
+  state.activeCategory = category;
+  applySearch();
+});
+
+els.folderNav.addEventListener('click', function (event) {
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-folder-id]') : null;
+  if (!(target instanceof HTMLButtonElement)) return;
+  const folderId = target.dataset.folderId || '';
+  state.activeFolderId = folderId === '' ? undefined : folderId === '__uncategorized__' ? null : folderId;
+  applySearch();
+});
+els.manageFoldersBtn.onclick = openFolderDialog;
+els.closeFolderDialogBtn.onclick = closeFolderDialog;
+els.cancelFolderBtn.onclick = closeFolderDialog;
 
 function updateTotpUi() {
   const enrollmentOpen = !els.totpEnrollmentPanel.classList.contains('hidden');
@@ -1659,12 +1777,6 @@ async function logout() {
   setStatus('');
 }
 
-els.logoutBtn.onclick = function () {
-  logout().catch(function (error) {
-    setStatus(error instanceof Error ? error.message : '退出失败');
-  });
-};
-
 els.loginLogoutBtn.onclick = function () {
   logout().catch(function (error) {
     els.loginStatus.textContent = error instanceof Error ? error.message : '退出失败';
@@ -1776,7 +1888,13 @@ document.addEventListener('keydown', function (event) {
     }
   }
   if (event.key === 'Escape') {
-    if (!els.shareModal.classList.contains('hidden')) {
+    if (!els.settingsPanel.classList.contains('hidden')) {
+      event.preventDefault();
+      closeSettings();
+    } else if (!els.folderDialog.classList.contains('hidden')) {
+      event.preventDefault();
+      closeFolderDialog();
+    } else if (!els.shareModal.classList.contains('hidden')) {
       event.preventDefault();
       closeShareDialog();
     } else if (!els.editorModal.classList.contains('hidden')) {
