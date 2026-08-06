@@ -2,6 +2,34 @@ import { buildNoteSnippet } from './note-records.js';
 
 const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** @param {string} text */
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Produces plain-text highlight ranges so callers never need to interpolate
+ * decrypted note titles into HTML.
+ * @param {string} text
+ * @param {string} query
+ */
+export function buildHighlightedTextSegments(text, query) {
+  const source = String(text || '');
+  const needle = String(query || '').trim();
+  if (!needle) return [{ text: source, highlighted: false }];
+  const pattern = new RegExp(escapeRegExp(needle), 'gi');
+  const segments = [];
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(source))) {
+    if (match.index > cursor) segments.push({ text: source.slice(cursor, match.index), highlighted: false });
+    segments.push({ text: match[0], highlighted: true });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < source.length) segments.push({ text: source.slice(cursor), highlighted: false });
+  return segments.length ? segments : [{ text: source, highlighted: false }];
+}
+
 /**
  * @param {{ title?: string, record: any, folder?: string, createdAt: number, updatedAt: number }} note
  */

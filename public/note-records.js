@@ -84,6 +84,20 @@ export function encodePasswordRecord(record) {
   return JSON.stringify(result);
 }
 
+/**
+ * Returns user-facing Markdown for a note record, or the legacy plaintext
+ * fallback. Password records are intentionally never returned here so list
+ * copy and sharing cannot expose their serialized fields.
+ * @param {any} record
+ * @param {string} legacyContent
+ * @returns {string|null}
+ */
+export function getSafeRecordText(record, legacyContent = '') {
+  if (!record) return String(legacyContent || '');
+  if (record.type === 'note') return String(record.markdown || '');
+  return null;
+}
+
 /** @param {any} record @param {number} maxLength */
 export function buildNoteSnippet(record, maxLength = 140) {
   const markdown = typeof record === 'string' ? record : String(record?.markdown || '');

@@ -4,6 +4,7 @@ import {
 	decodeNoteRecord,
 	encodeNoteRecord,
 	encodePasswordRecord,
+	getSafeRecordText,
 	normalizePasswordFields,
 } from '../public/note-records.js';
 import { buildNoteCardViewModel } from '../public/markdown.js';
@@ -119,5 +120,19 @@ describe('note record codecs', () => {
 			createdAt: 1717200000000,
 			updatedAt: 1717286400000,
 		});
+	});
+
+	it('returns only Markdown for safe note sharing and copying', () => {
+		const note = decodeNoteRecord(JSON.stringify({ v: 1, type: 'note', folderId: null, markdown: '# Share me' }));
+		const password = decodeNoteRecord(JSON.stringify({ v: 1, type: 'password', folderId: null, fields: [
+			{ id: 'name', type: 'text', label: '名称', value: 'Account' },
+			{ id: 'username', type: 'text', label: '用户名', value: 'alice' },
+			{ id: 'password', type: 'secret', label: '密码', value: 'secret' },
+			{ id: 'url', type: 'text', label: '网址', value: '' },
+			{ id: 'notes', type: 'multiline', label: '备注', value: '' },
+		] }));
+		expect(getSafeRecordText(note, 'legacy')).toBe('# Share me');
+		expect(getSafeRecordText(null, 'legacy')).toBe('legacy');
+		expect(getSafeRecordText(password, 'legacy')).toBeNull();
 	});
 });

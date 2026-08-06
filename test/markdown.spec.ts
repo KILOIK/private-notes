@@ -1,10 +1,23 @@
 import { expect, it } from 'vitest';
 import {
+	buildHighlightedTextSegments,
 	buildReaderRenderPlan,
 	extractAttachmentIds,
 	insertMarkdownAtSelection,
 	replaceAttachmentReference,
 } from '../public/markdown.js';
+
+it('keeps highlighted note titles as text segments instead of HTML', () => {
+	expect(buildHighlightedTextSegments('<img src=x onerror=alert(1)> Weekly', '<img')).toEqual([
+		{ text: '<img', highlighted: true },
+		{ text: ' src=x onerror=alert(1)> Weekly', highlighted: false },
+	]);
+	expect(buildHighlightedTextSegments('Alpha ALPHA', 'alpha')).toEqual([
+		{ text: 'Alpha', highlighted: true },
+		{ text: ' ', highlighted: false },
+		{ text: 'ALPHA', highlighted: true },
+	]);
+});
 
 it('extracts unique attachment references and ignores malformed tokens', () => {
 	expect(extractAttachmentIds('![a](attachment://11111111-1111-4111-8111-111111111111)\n![b](attachment://11111111-1111-4111-8111-111111111111)\n![x](attachment://bad)')).toEqual([

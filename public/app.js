@@ -1,8 +1,8 @@
 import { encryptSharedPayload } from './share-crypto.js';
-import { buildNoteCardViewModel, buildReaderRenderPlan, renderMarkdown, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
+import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, renderMarkdown, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImage, revokeAttachmentUrls } from './attachment-crypto.js';
 import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
-import { decodeNoteRecord } from './note-records.js';
+import { decodeNoteRecord, getSafeRecordText } from './note-records.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -563,11 +563,13 @@ async function encryptValue(value) {
  * @param {Note} note
  */
 async function encryptShare(note) {
+  const content = getSafeRecordText(note.record, note.content);
+  if (content === null) throw new Error('密码记录不能分享');
   const attachments = await collectShareAttachments(note);
   return encryptSharedPayload({
     v: 1,
     title: note.title || '无标题',
-    content: note.content || '',
+    content: content,
     createdAt: note.created_at,
     sharedAt: Date.now(),
     ...(attachments.length ? { attachments: attachments } : {})
@@ -840,31 +842,6 @@ function wordCount(text) {
   return (text || '').replace(/\s+/g, '').length;
 }
 
-/** @param {string} text */
-function escapeHtml(text) {
-  return (text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/** @param {string} text */
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** @param {string} text @param {string} query */
-function highlightText(text, query) {
-  const safe = escapeHtml(text || '');
-  if (!query) return safe;
-  const escaped = escapeRegExp(query.trim());
-  if (!escaped) return safe;
-  return safe.replace(new RegExp(escaped, 'gi'), function (match) {
-    return '<mark class="search-highlight">' + match + '</mark>';
-  });
-}
-
 /** @param {Note} note */
 function getDisplayContent(note) {
   const content = note.content || '';
@@ -1033,7 +1010,16 @@ function renderList() {
 
       const title = document.createElement('div');
       title.className = 'note-card-title';
-      title.innerHTML = highlightText(viewModel.title, els.searchInput.value.trim());
+      buildHighlightedTextSegments(viewModel.title, els.searchInput.value).forEach(function (segment) {
+        if (!segment.highlighted) {
+          title.append(document.createTextNode(segment.text));
+          return;
+        }
+        const mark = document.createElement('mark');
+        mark.className = 'search-highlight';
+        mark.textContent = segment.text;
+        title.append(mark);
+      });
 
       const actions = document.createElement('div');
       actions.className = 'note-actions';
@@ -1042,10 +1028,12 @@ function renderList() {
       copyBtn.type = 'button';
       copyBtn.className = 'btn';
       copyBtn.textContent = '复制全文';
-      copyBtn.disabled = note.decryptFailed;
+      const copyText = getSafeRecordText(note.record, note.content);
+      copyBtn.disabled = note.decryptFailed || copyText === null;
       copyBtn.onclick = async function () {
         try {
-          await navigator.clipboard.writeText(note.content || '');
+          if (copyText === null) throw new Error('password copy disabled');
+          await navigator.clipboard.writeText(copyText);
           setStatus('已复制：' + (note.title || '无标题'));
         } catch (error) {
           setStatus('复制失败，请手动选择文本复制');
@@ -1184,31 +1172,10 @@ async function openReader(noteId) {
   if (!plan.renderMarkdown) {
     els.readerContent.classList.add('hidden');
     els.passwordFields.classList.remove('hidden');
-    const fields = /** @type {Array<{ id?: string, label?: string, value?: string }>} */ (Array.isArray(note.record?.fields) ? note.record.fields : []);
-    fields.forEach(function (field) {
-      const item = document.createElement('section');
-      item.className = 'password-field';
-      const label = document.createElement('div');
-      label.className = 'password-field-label';
-      label.textContent = String(field.label || field.id || '字段');
-      const value = document.createElement('div');
-      value.className = 'password-field-value';
-      value.textContent = String(field.value || '');
-      const copy = document.createElement('button');
-      copy.type = 'button';
-      copy.className = 'btn secondary password-field-copy';
-      copy.textContent = '复制';
-      copy.onclick = async function () {
-        try {
-          await navigator.clipboard.writeText(String(field.value || ''));
-          setStatus('已复制' + String(field.label || field.id || '字段'));
-        } catch {
-          setStatus('复制失败，请手动选择内容复制');
-        }
-      };
-      item.append(label, value, copy);
-      els.passwordFields.append(item);
-    });
+    const placeholder = document.createElement('p');
+    placeholder.className = 'password-fields-placeholder';
+    placeholder.textContent = '密码记录已安全保存。打开编辑可管理字段。';
+    els.passwordFields.append(placeholder);
     return;
   }
 
