@@ -1,6 +1,7 @@
 import { encryptSharedPayload } from './share-crypto.js';
 import { renderMarkdown, extractAttachmentIds, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImage, revokeAttachmentUrls } from './attachment-crypto.js';
+import { matchesNoteFilter, sortFolders } from './folder-model.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -38,7 +39,12 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * pendingLoginPassword: string,
  * reauthRequired: boolean,
  * totpEnabled: boolean,
- * idleTimer: number | null
+ * idleTimer: number | null,
+ * encryptedFolders: Array<{ id: string, name: string, created_at: number, updated_at: number }>,
+ * folders: Array<{ id: string, name: string, created_at: number, updated_at: number }>,
+ * folderMap: Map<string, { id: string, name: string, created_at: number, updated_at: number }>,
+ * activeCategory: 'all' | 'note' | 'password',
+ * activeFolderId: string | null
  * }} */
 const state = {
   notes: [],
@@ -68,7 +74,12 @@ const state = {
   pendingLoginPassword: '',
   reauthRequired: false,
   totpEnabled: false,
-  idleTimer: null
+  idleTimer: null,
+  encryptedFolders: [],
+  folders: [],
+  folderMap: new Map(),
+  activeCategory: 'all',
+  activeFolderId: null
 };
 /**
  * @param {string} id
@@ -288,11 +299,20 @@ function clearAttachmentUrls() {
   revokeAttachmentUrls(state.attachmentUrls);
 }
 
+function clearFolderState() {
+  state.encryptedFolders = [];
+  state.folders = [];
+  state.folderMap = new Map();
+  state.activeCategory = 'all';
+  state.activeFolderId = null;
+}
+
 /** @param {'idle' | 'logout' | 'reauth_required'} reason */
 function lockVault(reason) {
   if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
   state.idleTimer = null;
   clearAttachmentUrls();
+  clearFolderState();
   state.vaultUnlocked = false;
   state.vaultKey = null;
   state.cryptoConfig = null;
@@ -544,6 +564,41 @@ async function decryptNotes(rawNotes) {
   return decrypted;
 }
 
+async function refreshFolders() {
+  if (!state.vaultUnlocked) {
+    clearFolderState();
+    return;
+  }
+
+  const data = await api('/api/folders');
+  if (!Array.isArray(data.folders)) {
+    throw new Error('服务器返回的文件夹列表格式无效');
+  }
+
+  /** @type {Array<{ id: string, name: string, created_at: number, updated_at: number }>} */
+  const encryptedFolders = data.folders.map(function (/** @type {any} */ folder) {
+    if (!folder || typeof folder !== 'object' || typeof folder.id !== 'string' || typeof folder.name !== 'string' ||
+      !Number.isSafeInteger(folder.created_at) || !Number.isSafeInteger(folder.updated_at)) {
+      throw new Error('服务器返回的文件夹格式无效');
+    }
+    return {
+      id: folder.id,
+      name: folder.name,
+      created_at: folder.created_at,
+      updated_at: folder.updated_at
+    };
+  });
+  const folders = await Promise.all(encryptedFolders.map(async function (folder) {
+    return { ...folder, name: await decryptValue(folder.name) };
+  }));
+
+  state.encryptedFolders = sortFolders(encryptedFolders);
+  state.folders = sortFolders(folders);
+  state.folderMap = new Map(state.folders.map(function (folder) { return [folder.id, folder]; }));
+  if (state.activeFolderId && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = null;
+  applySearch();
+}
+
 /**
  * Search is memory-only: keystrokes never trigger API requests or repeat
  * decryption work.
@@ -561,7 +616,9 @@ function filterNotes(notes, query) {
 }
 
 function applySearch() {
-  state.notes = filterNotes(state.allNotes, els.searchInput.value);
+  state.notes = filterNotes(state.allNotes, els.searchInput.value).filter(function (note) {
+    return matchesNoteFilter(note, state.activeCategory, state.activeFolderId, state.folderMap);
+  });
   state.expandedIds.forEach(function (id) {
     if (!state.notes.find(function (note) { return note.id === id; })) {
       state.expandedIds.delete(id);
@@ -1322,6 +1379,7 @@ async function unlockVault(passphrase, allowKeyCheckInit) {
     state.vaultUnlocked = true;
     state.unlockError = '';
     await refreshNotes();
+    await refreshFolders();
 
     if (!config.keyCheck) {
       if (state.decryptFailedCount > 0) {
@@ -1579,6 +1637,7 @@ async function logout() {
   clearAttachmentUrls();
   closeComposer();
   closeShareDialog(true);
+  clearFolderState();
   state.notes = [];
   state.allNotes = [];
   state.sessionAuthenticated = false;
