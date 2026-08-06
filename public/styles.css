@@ -798,7 +798,7 @@ button, input, textarea { font: inherit; }
   font-size: 13px;
 }
 .workspace-layout {
-  grid-template-columns: minmax(280px, .86fr) minmax(0, 1.14fr);
+  grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr);
   align-items: start;
 }
 .reader-view {

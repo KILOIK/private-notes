@@ -244,11 +244,20 @@ function updateModalUi() {
   });
 }
 
+function getDrawerFocusable() {
+  return /** @type {HTMLElement[]} */ (Array.from(els.settingsPanel.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+  )).filter(function (element) {
+    return element instanceof HTMLElement && element.getClientRects().length > 0;
+  }));
+}
+
 function openSettings() {
   state.settingsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   els.settingsPanel.classList.remove('hidden');
   els.settingsPanel.setAttribute('aria-hidden', 'false');
   els.settingsBtn.setAttribute('aria-expanded', 'true');
+  els.appView.inert = true;
   els.settingsPanel.focus();
 }
 
@@ -256,6 +265,7 @@ function closeSettings() {
   els.settingsPanel.classList.add('hidden');
   els.settingsPanel.setAttribute('aria-hidden', 'true');
   els.settingsBtn.setAttribute('aria-expanded', 'false');
+  els.appView.inert = false;
   const returnFocus = state.settingsReturnFocus;
   state.settingsReturnFocus = null;
   if (returnFocus && returnFocus.isConnected) returnFocus.focus();
@@ -1865,6 +1875,25 @@ els.copyShareLinkBtn.onclick = function () {
 };
 
 document.addEventListener('keydown', function (event) {
+  if (event.key === 'Tab' && !els.settingsPanel.classList.contains('hidden')) {
+    const focusable = getDrawerFocusable();
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const activeElement = document.activeElement;
+    if (!first || !last) {
+      event.preventDefault();
+      els.settingsPanel.focus();
+    } else if (!(activeElement instanceof HTMLElement) || !els.settingsPanel.contains(activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
   if (event.key === 'Tab' && !els.shareModal.classList.contains('hidden')) {
     const focusable = /** @type {HTMLElement[]} */ (Array.from(els.shareModal.querySelectorAll(
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'

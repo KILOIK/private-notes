@@ -203,7 +203,22 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('folderDialog');
 		expect(appHtml).toContain('attachmentStatus');
 		expect(appHtml).toContain('per-field-copy');
+		expect(appHtml).toContain('id="mobilePasteStatus"');
+		expect(appHtml).toContain('aria-live="polite"');
 		expect(appHtml).not.toContain('id="logoutBtn"');
+		const shellStart = appHtml.indexOf('<main class="layout workspace-layout">');
+		const sidebarIndex = appHtml.indexOf('class="card workspace-sidebar"', shellStart);
+		const feedIndex = appHtml.indexOf('class="card feed"', shellStart);
+		const readerIndex = appHtml.indexOf('id="readerView"', shellStart);
+		expect(shellStart).toBeGreaterThanOrEqual(0);
+		expect(sidebarIndex).toBeGreaterThan(shellStart);
+		expect(feedIndex).toBeGreaterThan(sidebarIndex);
+		expect(readerIndex).toBeGreaterThan(feedIndex);
+
+		const stylesResponse = await env.ASSETS.fetch(new Request(`${ORIGIN}/styles.css`));
+		const styles = await stylesResponse.text();
+		expect(styles).toContain('.workspace-layout {\n  grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr);');
+		expect(styles).not.toContain('.workspace-layout {\n  grid-template-columns: minmax(280px, .86fr) minmax(0, 1.14fr);');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);
