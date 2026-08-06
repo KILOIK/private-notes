@@ -193,6 +193,17 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('readerView');
 		expect(appHtml).toContain('editorToolbar');
 		expect(appHtml).toContain('totpChallengePanel');
+		expect(appHtml).toContain('categoryNav');
+		expect(appHtml).toContain('folderNav');
+		expect(appHtml).toContain('settingsBtn');
+		expect(appHtml).toContain('settingsPanel');
+		expect(appHtml).toContain('settingsLogoutBtn');
+		expect(appHtml).toContain('passwordFields');
+		expect(appHtml).toContain('passwordEditorFields');
+		expect(appHtml).toContain('folderDialog');
+		expect(appHtml).toContain('attachmentStatus');
+		expect(appHtml).toContain('per-field-copy');
+		expect(appHtml).not.toContain('id="logoutBtn"');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);
