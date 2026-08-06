@@ -1,11 +1,12 @@
 import { encryptSharedPayload } from './share-crypto.js';
-import { renderMarkdown, extractAttachmentIds, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
+import { buildNoteCardViewModel, buildReaderRenderPlan, renderMarkdown, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImage, revokeAttachmentUrls } from './attachment-crypto.js';
-import { matchesNoteFilter, sortFolders } from './folder-model.js';
+import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
+import { decodeNoteRecord } from './note-records.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
- * @typedef {RawNote & { encrypted: boolean, decryptFailed: boolean, attachmentIds?: string[] }} Note
+ * @typedef {RawNote & { encrypted: boolean, decryptFailed: boolean, record?: any, folderName?: string, attachmentIds?: string[] }} Note
  * @typedef {{ vaultSalt: string, cipher: 'aes-gcm-256', kdf: 'pbkdf2-sha256', iterations: number, version: 1, keyCheck: string | null }} CryptoConfig
  */
 
@@ -575,7 +576,7 @@ async function encryptShare(note) {
 
 /** @param {Note} note */
 async function collectShareAttachments(note) {
-  const ids = extractAttachmentIds(note.content || '');
+  const ids = buildReaderRenderPlan(note.record || decodeNoteRecord(note.content)).attachmentIds;
   if (!ids.length) return [];
   if (!state.vaultKey) throw new Error('请先解锁内容');
   const listed = await api('/api/attachments?noteId=' + encodeURIComponent(note.id));
@@ -637,15 +638,19 @@ async function decryptNotes(rawNotes) {
     try {
       const encrypted = isEncryptedValue(note.title) && isEncryptedValue(note.content);
       if (!encrypted) legacyPlaintextCount += 1;
+      const content = await decryptValue(note.content);
+      const record = decodeNoteRecord(content);
       decrypted.push({
         id: note.id,
         title: await decryptValue(note.title),
-        content: await decryptValue(note.content),
+        content: content,
         created_at: note.created_at,
         updated_at: note.updated_at,
         revision: note.revision,
         encrypted: encrypted,
-        decryptFailed: false
+        decryptFailed: false,
+        record: record,
+        folderName: resolveFolderName(state.folderMap, record.folderId)
       });
     } catch (error) {
       failedCount += 1;
@@ -701,6 +706,9 @@ async function refreshFolders() {
   state.encryptedFolders = sortFolders(encryptedFolders);
   state.folders = sortFolders(folders);
   state.folderMap = new Map(state.folders.map(function (folder) { return [folder.id, folder]; }));
+  state.allNotes.forEach(function (note) {
+    if (note.record) note.folderName = resolveFolderName(state.folderMap, note.record.folderId);
+  });
   if (state.activeFolderId && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = undefined;
   renderFolders();
   applySearch();
@@ -997,13 +1005,35 @@ function renderList() {
       const card = document.createElement('article');
       card.className = 'note-card' + (note.decryptFailed ? ' decrypt-failed' : '');
 
+      const viewModel = buildNoteCardViewModel({
+        title: note.title,
+        record: note.record || decodeNoteRecord(note.content),
+        folder: note.folderName,
+        createdAt: note.created_at,
+        updatedAt: note.updated_at
+      });
+
+      const labels = document.createElement('div');
+      labels.className = 'note-card-labels';
+      const type = document.createElement('span');
+      type.className = 'note-card-label';
+      type.textContent = viewModel.type === 'password' ? '密码' : '笔记';
+      const folder = document.createElement('span');
+      folder.className = 'note-card-label';
+      folder.textContent = viewModel.folder;
+      labels.append(type, folder);
+
       const meta = document.createElement('div');
       meta.className = 'note-card-meta';
-      meta.innerHTML = '<span>创建 ' + formatDate(note.created_at) + '</span><span>更新 ' + formatDate(note.updated_at) + '</span>';
+      const created = document.createElement('span');
+      created.textContent = '创建 ' + formatDate(viewModel.createdAt);
+      const updated = document.createElement('span');
+      updated.textContent = '更新 ' + formatDate(viewModel.updatedAt);
+      meta.append(created, updated);
 
       const title = document.createElement('div');
       title.className = 'note-card-title';
-      title.innerHTML = highlightText(note.title || '无标题', els.searchInput.value.trim());
+      title.innerHTML = highlightText(viewModel.title, els.searchInput.value.trim());
 
       const actions = document.createElement('div');
       actions.className = 'note-actions';
@@ -1070,14 +1100,11 @@ function renderList() {
       moreWrap.appendChild(moreBtn);
       moreWrap.appendChild(moreMenu);
 
-      const body = document.createElement('div');
-      const displayContent = getDisplayContent(note);
-      body.className = 'note-card-text' + (note.content ? '' : ' is-empty');
-      body.textContent = note.content ? displayContent.text : '这条笔记还没有内容。';
-      const bodyWrap = document.createElement('div');
-      bodyWrap.className = 'note-card-text-wrap' + (displayContent.canExpand && !displayContent.expanded ? ' collapsed' : '');
-      bodyWrap.appendChild(body);
+      const snippet = document.createElement('div');
+      snippet.className = 'note-card-snippet' + (viewModel.snippet ? '' : ' is-empty');
+      snippet.textContent = viewModel.snippet || '这条笔记还没有内容。';
 
+      card.appendChild(labels);
       card.appendChild(meta);
       card.appendChild(actions);
       actions.appendChild(copyBtn);
@@ -1085,28 +1112,11 @@ function renderList() {
       actions.appendChild(editBtn);
       actions.appendChild(moreWrap);
       card.appendChild(title);
-      card.appendChild(bodyWrap);
+      card.appendChild(snippet);
       card.addEventListener('click', function (event) {
         if (event.target instanceof HTMLElement && event.target.closest('button')) return;
         openReader(note.id).catch(function (error) { setStatus(error.message || '打开笔记失败'); });
       });
-
-      if (displayContent.canExpand) {
-        const toggleBtn = document.createElement('button');
-        toggleBtn.type = 'button';
-        toggleBtn.className = 'btn secondary note-expand';
-        toggleBtn.textContent = displayContent.expanded ? '收起' : '展开全文';
-        toggleBtn.onclick = function () {
-          if (state.expandedIds.has(note.id)) {
-            state.expandedIds.delete(note.id);
-          } else {
-            state.expandedIds.add(note.id);
-          }
-          renderList();
-        };
-        card.appendChild(toggleBtn);
-      }
-
       group.appendChild(card);
     });
 
@@ -1166,13 +1176,47 @@ async function openReader(noteId) {
   els.readerTitle.textContent = note.title || '无标题';
   els.readerMeta.textContent = '创建 ' + formatDate(note.created_at) + ' · 更新 ' + formatDate(note.updated_at);
   els.readerContent.replaceChildren();
+  els.readerContent.classList.remove('hidden');
+  els.passwordFields.replaceChildren();
+  els.passwordFields.classList.add('hidden');
   els.readerView.classList.remove('hidden');
+  const plan = buildReaderRenderPlan(note.record || decodeNoteRecord(note.content));
+  if (!plan.renderMarkdown) {
+    els.readerContent.classList.add('hidden');
+    els.passwordFields.classList.remove('hidden');
+    const fields = /** @type {Array<{ id?: string, label?: string, value?: string }>} */ (Array.isArray(note.record?.fields) ? note.record.fields : []);
+    fields.forEach(function (field) {
+      const item = document.createElement('section');
+      item.className = 'password-field';
+      const label = document.createElement('div');
+      label.className = 'password-field-label';
+      label.textContent = String(field.label || field.id || '字段');
+      const value = document.createElement('div');
+      value.className = 'password-field-value';
+      value.textContent = String(field.value || '');
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'btn secondary password-field-copy';
+      copy.textContent = '复制';
+      copy.onclick = async function () {
+        try {
+          await navigator.clipboard.writeText(String(field.value || ''));
+          setStatus('已复制' + String(field.label || field.id || '字段'));
+        } catch {
+          setStatus('复制失败，请手动选择内容复制');
+        }
+      };
+      item.append(label, value, copy);
+      els.passwordFields.append(item);
+    });
+    return;
+  }
+
   const attachmentMap = new Map();
-  const ids = extractAttachmentIds(note.content || '');
-  if (ids.length) {
+  if (plan.attachmentIds.length) {
     const listed = await api('/api/attachments?noteId=' + encodeURIComponent(note.id));
     const allowed = new Map((/** @type {Array<{ id: string, mime_type: string }>} */ (listed.attachments || [])).map(function (item) { return [item.id, item]; }));
-    for (const id of ids) {
+    for (const id of plan.attachmentIds) {
       const metadata = allowed.get(id);
       if (!metadata) continue;
       try {
@@ -1187,7 +1231,7 @@ async function openReader(noteId) {
       }
     }
   }
-  els.readerContent.append(renderMarkdown(note.content || '', attachmentMap));
+  els.readerContent.append(renderMarkdown(plan.markdown, attachmentMap));
 }
 
 function closeReader() {
@@ -1198,6 +1242,11 @@ function closeReader() {
 }
 
 function updateEditorPreview() {
+  const editingNote = state.allNotes.find(function (note) { return note.id === state.editingId; });
+  if (editingNote && !buildReaderRenderPlan(editingNote.record || decodeNoteRecord(editingNote.content)).renderMarkdown) {
+    els.editorPreview.textContent = '密码记录不支持 Markdown 预览。';
+    return;
+  }
   els.editorPreview.replaceChildren(renderMarkdown(els.editorContent.value, new Map()));
 }
 
@@ -1514,8 +1563,8 @@ async function unlockVault(passphrase, allowKeyCheckInit) {
     await verifyKeyCheck(config);
     state.vaultUnlocked = true;
     state.unlockError = '';
-    await refreshNotes();
     await refreshFolders();
+    await refreshNotes();
 
     if (!config.keyCheck) {
       if (state.decryptFailedCount > 0) {

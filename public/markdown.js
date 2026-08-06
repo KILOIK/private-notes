@@ -1,4 +1,34 @@
+import { buildNoteSnippet } from './note-records.js';
+
 const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * @param {{ title?: string, record: any, folder?: string, createdAt: number, updatedAt: number }} note
+ */
+export function buildNoteCardViewModel(note) {
+  const record = note.record || { type: 'note', markdown: '' };
+  return {
+    title: String(note.title || '无标题'),
+    snippet: record.type === 'note' ? buildNoteSnippet(record) : '密码记录',
+    type: record.type === 'password' ? 'password' : 'note',
+    folder: String(note.folder || '未分类'),
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt
+  };
+}
+
+/** @param {any} record */
+export function buildReaderRenderPlan(record) {
+  if (record && record.type === 'note') {
+    const markdown = String(record.markdown || '');
+    return {
+      renderMarkdown: true,
+      markdown: markdown,
+      attachmentIds: extractAttachmentIds(markdown)
+    };
+  }
+  return { renderMarkdown: false, markdown: '', attachmentIds: [] };
+}
 
 /** @param {string} source */
 export function extractAttachmentIds(source) {

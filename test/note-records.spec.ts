@@ -6,6 +6,7 @@ import {
 	encodePasswordRecord,
 	normalizePasswordFields,
 } from '../public/note-records.js';
+import { buildNoteCardViewModel } from '../public/markdown.js';
 
 type PasswordField = {
 	id: string;
@@ -100,5 +101,23 @@ describe('note record codecs', () => {
 		expect(buildNoteSnippet({ markdown: '<img src=x onerror=alert(1)>safe' }, 20)).toBe('safe');
 		expect(buildNoteSnippet({ markdown: '😀😀😀' }, 3)).toBe('😀😀😀');
 		expect(buildNoteSnippet({ markdown: '😀😀😀' }, 2)).toBe('😀…');
+	});
+
+	it('builds a mainstream note card view model with a plain-text snippet', () => {
+		const record = decodeNoteRecord('# Sprint **plan**\n\n- Ship reader details');
+		expect(buildNoteCardViewModel({
+			title: 'Weekly planning',
+			record,
+			folder: 'Work',
+			createdAt: 1717200000000,
+			updatedAt: 1717286400000,
+		})).toEqual({
+			title: 'Weekly planning',
+			snippet: 'Sprint plan Ship reader details',
+			type: 'note',
+			folder: 'Work',
+			createdAt: 1717200000000,
+			updatedAt: 1717286400000,
+		});
 	});
 });
