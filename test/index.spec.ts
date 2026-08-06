@@ -206,7 +206,7 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('id="mobilePasteStatus"');
 		expect(appHtml).toContain('aria-live="polite"');
 		expect(appHtml).not.toContain('id="logoutBtn"');
-		const shellStart = appHtml.indexOf('<main class="layout workspace-layout">');
+		const shellStart = appHtml.indexOf('<main id="workspaceLayout" class="layout workspace-layout">');
 		const sidebarIndex = appHtml.indexOf('class="card workspace-sidebar"', shellStart);
 		const feedIndex = appHtml.indexOf('class="card feed"', shellStart);
 		const readerIndex = appHtml.indexOf('id="readerView"', shellStart);
@@ -219,6 +219,14 @@ describe('private-notes worker', () => {
 		const styles = await stylesResponse.text();
 		expect(styles).toContain('.workspace-layout {\n  grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr);');
 		expect(styles).not.toContain('.workspace-layout {\n  grid-template-columns: minmax(280px, .86fr) minmax(0, 1.14fr);');
+
+		const appScriptResponse = await env.ASSETS.fetch(new Request(`${ORIGIN}/app.js`));
+		const appScript = await appScriptResponse.text();
+		expect(appScript).toContain('function setSettingsBackgroundInert(inert)');
+		expect(appScript).toContain('[els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn]');
+		expect(appScript).toContain('setSettingsBackgroundInert(true);');
+		expect(appScript).toContain('setSettingsBackgroundInert(false);');
+		expect(appScript).not.toContain('els.appView.inert = true;');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);

@@ -150,6 +150,7 @@ const els = {
   settingsLogoutBtn: getButton('settingsLogoutBtn'),
   statusLine: getElement('statusLine'),
   vaultPanel: getElement('vaultPanel'),
+  workspaceLayout: getElement('workspaceLayout'),
   vaultPanelDesc: getElement('vaultPanelDesc'),
   vaultUnlockInput: getInput('vaultUnlockInput'),
   unlockBtn: getButton('unlockBtn'),
@@ -252,12 +253,19 @@ function getDrawerFocusable() {
   }));
 }
 
+/** @param {boolean} inert */
+function setSettingsBackgroundInert(inert) {
+  [els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
+    element.inert = inert;
+  });
+}
+
 function openSettings() {
   state.settingsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   els.settingsPanel.classList.remove('hidden');
   els.settingsPanel.setAttribute('aria-hidden', 'false');
   els.settingsBtn.setAttribute('aria-expanded', 'true');
-  els.appView.inert = true;
+  setSettingsBackgroundInert(true);
   els.settingsPanel.focus();
 }
 
@@ -265,7 +273,7 @@ function closeSettings() {
   els.settingsPanel.classList.add('hidden');
   els.settingsPanel.setAttribute('aria-hidden', 'true');
   els.settingsBtn.setAttribute('aria-expanded', 'false');
-  els.appView.inert = false;
+  setSettingsBackgroundInert(false);
   const returnFocus = state.settingsReturnFocus;
   state.settingsReturnFocus = null;
   if (returnFocus && returnFocus.isConnected) returnFocus.focus();

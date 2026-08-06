@@ -38,3 +38,18 @@ Tests:
 - `git diff --check` — passed.
 
 Concerns: none.
+
+## Fix round 2
+
+Status: DONE
+
+Fixed:
+- Kept the settings drawer interactive by inerting only its background regions: top bar, status line, vault panel, workspace layout, and floating actions.
+- Restored the same regions on close while preserving the drawer focus trap, Escape close, focus return, Authenticator controls, and logout behavior.
+
+Tests:
+- `npx vitest run test/index.spec.ts -t "serves the application shell"` — passed (1 test, 32 skipped) after a confirmed RED failure for the missing targeted inert helper.
+- `npm run typecheck:client` — passed.
+- `git diff --check` — passed.
+
+Concerns: none.
