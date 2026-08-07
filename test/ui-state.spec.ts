@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createLatestOperation } from '../public/latest-operation.js';
-import { clearDecryptedNoteState } from '../public/vault-ui-state.js';
+import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from '../public/vault-ui-state.js';
 
 describe('sensitive UI state', () => {
 	it('invalidates an older reader operation when a newer one starts or the reader closes', () => {
@@ -34,5 +34,53 @@ describe('sensitive UI state', () => {
 		expect(state.readerNoteId).toBeNull();
 		expect(state.decryptFailedCount).toBe(0);
 		expect(state.legacyPlaintextCount).toBe(0);
+	});
+
+	it('removes decrypted folder names and resets folder filters when the vault locks', () => {
+		const state = {
+			encryptedFolders: [{ id: 'folder-1', name: 'enc:v1:...' }],
+			folders: [{ id: 'folder-1', name: '私密工作' }],
+			folderMap: new Map([['folder-1', { id: 'folder-1', name: '私密工作' }]]),
+			activeCategory: 'password' as const,
+			activeFolderId: 'folder-1',
+		};
+
+		clearDecryptedFolderState(state);
+
+		expect(state.encryptedFolders).toEqual([]);
+		expect(state.folders).toEqual([]);
+		expect(state.folderMap.size).toBe(0);
+		expect(state.activeCategory).toBe('all');
+		expect(state.activeFolderId).toBeUndefined();
+	});
+
+	it('resets authentication state when logout or a revoked session ends the client session', () => {
+		const state = {
+			sessionAuthenticated: true,
+			vaultUnlocked: true,
+			vaultKey: { secret: true },
+			cryptoConfig: { version: 1 },
+			noteCountMeta: 2,
+			reauthRequired: true,
+			totpEnabled: true,
+			pendingLoginChallenge: 'challenge',
+			pendingLoginPassword: 'password',
+			unlockError: 'error',
+		};
+
+		clearSessionAuthState(state);
+
+		expect(state).toEqual({
+			sessionAuthenticated: false,
+			vaultUnlocked: false,
+			vaultKey: null,
+			cryptoConfig: null,
+			noteCountMeta: 0,
+			reauthRequired: false,
+			totpEnabled: false,
+			pendingLoginChallenge: null,
+			pendingLoginPassword: '',
+			unlockError: '',
+		});
 	});
 });

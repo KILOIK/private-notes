@@ -9,6 +9,7 @@ describe('composer saving state', () => {
 		const closeButton = { disabled: false };
 		const attributes = new Map<string, string>();
 		const modal = {
+			inert: false,
 			setAttribute(name: string, value: string) { attributes.set(name, value); },
 			removeAttribute(name: string) { attributes.delete(name); },
 		};
@@ -16,11 +17,13 @@ describe('composer saving state', () => {
 		setComposerSaving(state, { saveButton, cancelButton, closeButton, modal }, true);
 		expect(state.composerSaving).toBe(true);
 		expect([saveButton.disabled, cancelButton.disabled, closeButton.disabled]).toEqual([true, true, true]);
+		expect(modal.inert).toBe(true);
 		expect(attributes.get('aria-busy')).toBe('true');
 
 		setComposerSaving(state, { saveButton, cancelButton, closeButton, modal }, false);
 		expect(state.composerSaving).toBe(false);
 		expect([saveButton.disabled, cancelButton.disabled, closeButton.disabled]).toEqual([false, false, false]);
+		expect(modal.inert).toBe(false);
 		expect(attributes.has('aria-busy')).toBe(false);
 	});
 });

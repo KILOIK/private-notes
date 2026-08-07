@@ -7,7 +7,7 @@ import { buildNoteSaveContent, decodeNoteRecord, getSafeRecordText } from './not
 import { createDefaultPasswordFields } from './password-fields.js';
 import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
 import { createLatestOperation } from './latest-operation.js';
-import { clearDecryptedNoteState } from './vault-ui-state.js';
+import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { setComposerSaving } from './composer-saving.js';
 
 /**
@@ -551,15 +551,12 @@ async function discardAttachmentDraft() {
 }
 
 function clearFolderState() {
-  state.encryptedFolders = [];
-  state.folders = [];
-  state.folderMap = new Map();
-  state.activeCategory = 'all';
-  state.activeFolderId = undefined;
+  clearDecryptedFolderState(state);
+  renderFolders();
 }
 
-/** @param {'idle' | 'logout' | 'reauth_required'} reason */
-function lockVault(reason) {
+/** @param {boolean} [discardDraft] */
+function purgeVaultUi(discardDraft = true) {
   if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
   state.idleTimer = null;
   clearFolderState();
@@ -568,19 +565,33 @@ function lockVault(reason) {
   state.cryptoConfig = null;
   clearDecryptedNoteState(state);
   closeReader();
-  closeComposer();
+  closeComposer(discardDraft);
   closeSettings();
   closeFolderDialog();
   closeShareDialog(true);
   clearSensitiveInputs();
-  if (reason === 'logout') state.sessionAuthenticated = false;
+  renderList();
+}
+
+function endSession() {
+  purgeVaultUi(false);
+  clearSessionAuthState(state);
+  els.loginStatus.textContent = '';
+  showLogin();
+  renderList();
+  setStatus('');
+}
+
+/** @param {'idle' | 'logout' | 'reauth_required'} reason */
+function lockVault(reason) {
+  purgeVaultUi(true);
+  if (reason === 'logout') clearSessionAuthState(state);
   if (reason === 'reauth_required' || reason === 'idle') {
     state.sessionAuthenticated = true;
     state.reauthRequired = true;
     state.authMode = 'unlock';
   }
   showLogin();
-  renderList();
   setStatus(reason === 'idle' ? '已锁定：超过 30 分钟无操作，请重新验证' : '需要重新验证');
 }
 
@@ -1010,9 +1021,10 @@ function getDisplayContent(note) {
 /**
  * @param {string} url
  * @param {RequestInit} [options]
+ * @param {{ recordActivity?: boolean }} [behavior]
  * @returns {Promise<any>}
  */
-async function api(url, options) {
+async function api(url, options, behavior) {
   const res = await fetch(url, Object.assign({ credentials: 'same-origin' }, options || {}));
   const data = await res.json().catch(function () { return {}; });
   if (res.status === 401) {
@@ -1020,10 +1032,7 @@ async function api(url, options) {
       lockVault('reauth_required');
       throw new Error('需要重新验证');
     }
-    state.sessionAuthenticated = false;
-    state.vaultUnlocked = false;
-    state.vaultKey = null;
-    showLogin();
+    endSession();
     throw new Error('请先登录');
   }
   if (!res.ok) {
@@ -1035,7 +1044,7 @@ async function api(url, options) {
     }
     throw new Error(data.error || '请求失败');
   }
-  recordUserActivity();
+  if (behavior?.recordActivity !== false) recordUserActivity();
   return data;
 }
 
@@ -2068,31 +2077,8 @@ els.fabTopBtn.onclick = function () {
 
 async function logout() {
   await discardAttachmentDraft();
-  await api('/api/logout', { method: 'POST' });
-  closeSettings();
-  clearAttachmentUrls();
-  closeComposer(false);
-  closeShareDialog(true);
-  clearFolderState();
-  state.notes = [];
-  state.allNotes = [];
-  state.sessionAuthenticated = false;
-  state.vaultUnlocked = false;
-  state.vaultKey = null;
-  state.cryptoConfig = null;
-  state.noteCountMeta = 0;
-  state.decryptFailedCount = 0;
-  state.legacyPlaintextCount = 0;
-  state.reauthRequired = false;
-  state.totpEnabled = false;
-  state.pendingLoginChallenge = null;
-  state.pendingLoginPassword = '';
-  clearSensitiveInputs();
-  state.unlockError = '';
-  els.loginStatus.textContent = '';
-  showLogin();
-  renderList();
-  setStatus('');
+  await api('/api/logout', { method: 'POST' }, { recordActivity: false });
+  endSession();
 }
 
 els.loginLogoutBtn.onclick = function () {
@@ -2146,6 +2132,11 @@ els.insertImageBtn.onclick = function () {
 
 /** @param {ClipboardEvent} event */
 function handleEditorPaste(event) {
+  if (state.composerSaving) {
+    event.preventDefault();
+    setAttachmentStatus('正在保存，请稍候');
+    return;
+  }
   if (state.editorRecordType !== 'note') return;
   const images = extractPastedImages(event);
   if (!images.length) return;
@@ -2163,12 +2154,17 @@ els.editorModal.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('dragover', function (event) {
   event.preventDefault();
+  if (state.composerSaving) return;
   els.attachmentDropZone.classList.add('drag-over');
 });
 els.attachmentDropZone.addEventListener('dragleave', function () { els.attachmentDropZone.classList.remove('drag-over'); });
 els.attachmentDropZone.addEventListener('drop', function (event) {
   event.preventDefault();
   els.attachmentDropZone.classList.remove('drag-over');
+  if (state.composerSaving) {
+    setAttachmentStatus('正在保存，请稍候');
+    return;
+  }
   const image = extractDroppedImage(event);
   if (image) {
     try {

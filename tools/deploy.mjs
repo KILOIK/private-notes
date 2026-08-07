@@ -15,6 +15,15 @@ export function buildDeploymentSteps(config) {
 		: [deploy, migrate];
 }
 
+export function runDeploymentSteps(steps, run) {
+	for (const args of steps) {
+		const result = run(args);
+		if (result.error) throw result.error;
+		if (result.status !== 0) return result.status ?? 1;
+	}
+	return 0;
+}
+
 export async function runDeployment({
 	configUrl = new URL('../wrangler.jsonc', import.meta.url),
 	run = (args) => spawnSync('npx', ['wrangler', ...args], { stdio: 'inherit' }),
@@ -24,12 +33,7 @@ export async function runDeployment({
 	const config = parse(source, errors, { allowTrailingComma: true });
 	if (errors.length) throw new Error('wrangler.jsonc contains invalid JSONC');
 
-	for (const args of buildDeploymentSteps(config)) {
-		const result = run(args);
-		if (result.error) throw result.error;
-		if (result.status !== 0) return result.status ?? 1;
-	}
-	return 0;
+	return runDeploymentSteps(buildDeploymentSteps(config), run);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildDeploymentSteps } from './deploy.mjs';
+import { buildDeploymentSteps, runDeploymentSteps } from './deploy.mjs';
 
 test('applies migrations before deploying an existing D1-backed Worker', () => {
   assert.deepEqual(buildDeploymentSteps({
@@ -23,4 +23,32 @@ test('provisions D1 before migrating a fresh Deploy Button checkout', () => {
 
 test('fails closed when the DB binding is missing', () => {
   assert.throws(() => buildDeploymentSteps({ d1_databases: [] }), /DB binding/i);
+});
+
+test('stops before deploy when an existing database migration fails', () => {
+  const calls = [];
+  const status = runDeploymentSteps([
+    ['d1', 'migrations', 'apply', 'DB', '--remote'],
+    ['deploy'],
+  ], (args) => {
+    calls.push(args);
+    return { status: 1 };
+  });
+
+  assert.equal(status, 1);
+  assert.deepEqual(calls, [['d1', 'migrations', 'apply', 'DB', '--remote']]);
+});
+
+test('stops before migration when a fresh automatic deployment fails', () => {
+  const calls = [];
+  const status = runDeploymentSteps([
+    ['deploy'],
+    ['d1', 'migrations', 'apply', 'DB', '--remote'],
+  ], (args) => {
+    calls.push(args);
+    return { status: 2 };
+  });
+
+  assert.equal(status, 2);
+  assert.deepEqual(calls, [['deploy']]);
 });
