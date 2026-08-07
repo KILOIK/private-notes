@@ -77,6 +77,11 @@ export function encodeNoteRecord(record) {
   return JSON.stringify({ v: 1, type: 'note', folderId: typeof record.folderId === 'string' ? record.folderId : null, markdown: record.markdown });
 }
 
+/** @param {string} markdown @param {string | null} folderId */
+export function buildNoteSaveContent(markdown, folderId) {
+  return encodeNoteRecord({ type: 'note', folderId: folderId, markdown: markdown });
+}
+
 /** @param {any} record */
 export function encodePasswordRecord(record) {
   if (!record || typeof record !== 'object' || record.type !== 'password') throw new Error('invalid password record');

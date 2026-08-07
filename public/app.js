@@ -3,7 +3,7 @@ import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRender
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImages, revokeAttachmentUrls } from './attachment-crypto.js';
 import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePendingToken } from './attachment-draft.js';
 import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
-import { decodeNoteRecord, getSafeRecordText } from './note-records.js';
+import { buildNoteSaveContent, decodeNoteRecord, getSafeRecordText } from './note-records.js';
 import { createDefaultPasswordFields } from './password-fields.js';
 import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
 
@@ -1457,14 +1457,14 @@ async function saveComposer() {
     if (image.error) throw image.error;
     return image.uploadPromise || Promise.resolve();
   }));
-  let content = passwordPayload ? passwordPayload.content : els.editorContent.value.trim();
+  let markdown = password ? '' : els.editorContent.value.trim();
   if (!password) {
     for (const image of state.attachmentDraft.images) {
       if (!image.attachmentId) throw new Error('图片尚未上传完成');
-      content = replacePendingToken(content, image.token, image.attachmentId);
+      markdown = replacePendingToken(markdown, image.token, image.attachmentId);
     }
   }
-  if (!password && !title && !content) {
+  if (!password && !title && !markdown) {
     setStatus('标题和内容至少写一个');
     return;
   }
@@ -1475,9 +1475,10 @@ async function saveComposer() {
 
   setStatus('保存中…');
 
+  const content = passwordPayload ? passwordPayload.content : buildNoteSaveContent(markdown, state.editorFolderId);
   const encryptedTitle = await encryptValue(title);
   const encryptedContent = await encryptValue(content);
-  const attachmentIds = password ? [] : extractAttachmentIds(content);
+  const attachmentIds = password ? [] : extractAttachmentIds(markdown);
 
   let data;
   if (state.editingId) {

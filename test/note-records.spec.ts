@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildNoteSnippet,
+	buildNoteSaveContent,
 	decodeNoteRecord,
 	encodeNoteRecord,
 	encodePasswordRecord,
@@ -26,6 +27,15 @@ describe('note record codecs', () => {
 	it('round trips a structured note record', () => {
 		const record = { v: 1, type: 'note', folderId: 'folder-1', markdown: '**hello**' } as const;
 		expect(decodeNoteRecord(encodeNoteRecord(record))).toEqual(record);
+	});
+
+	it('builds ordinary note save content with the selected folder', () => {
+		expect(decodeNoteRecord(buildNoteSaveContent('# Folder note', 'folder-1'))).toEqual({
+			v: 1,
+			type: 'note',
+			folderId: 'folder-1',
+			markdown: '# Folder note',
+		});
 	});
 
 	it('normalizes fixed password fields before custom fields', () => {
