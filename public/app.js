@@ -5,7 +5,7 @@ import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePe
 import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
 import { decodeNoteRecord, getSafeRecordText } from './note-records.js';
 import { createDefaultPasswordFields } from './password-fields.js';
-import { buildPasswordSavePayload, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
+import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -1322,7 +1322,7 @@ function openComposer(note) {
   setAttachmentStatus('');
   els.editorModal.classList.remove('hidden');
   updateModalUi();
-  els.editorTitle.focus();
+  focusComposerPrimaryField(recordType, els.editorTitle, els.passwordEditorFields);
 }
 
 /** @param {boolean} [discardDraft] */

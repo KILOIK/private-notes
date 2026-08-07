@@ -17,6 +17,22 @@ export function buildPasswordSavePayload(fields, folderId) {
 }
 
 /**
+ * @param {'note' | 'password'} recordType
+ * @param {HTMLInputElement} titleInput
+ * @param {HTMLElement} passwordFields
+ */
+export function focusComposerPrimaryField(recordType, titleInput, passwordFields) {
+  if (recordType === 'password') {
+    const passwordName = /** @type {HTMLElement | null} */ (passwordFields.querySelector('.password-editor-value'));
+    if (passwordName) {
+      passwordName.focus();
+      return;
+    }
+  }
+  titleInput.focus();
+}
+
+/**
  * @param {HTMLElement} container
  * @param {PasswordField[]} fields
  * @param {(fields: PasswordField[]) => void} onFieldsChange

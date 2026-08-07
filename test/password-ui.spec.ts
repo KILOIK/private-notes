@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDefaultPasswordFields } from '../public/password-fields.js';
 import { decodeNoteRecord } from '../public/note-records.js';
-import { buildPasswordSavePayload, renderPasswordEditor, renderPasswordReader } from '../public/password-ui.js';
+import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from '../public/password-ui.js';
 
 class TestElement {
 	children: TestElement[] = [];
@@ -11,6 +11,7 @@ class TestElement {
 	value = '';
 	rows = 0;
 	readOnly = false;
+	focused = false;
 	onclick: (() => void) | null = null;
 	private listeners = new Map<string, Array<() => void>>();
 
@@ -23,6 +24,15 @@ class TestElement {
 	}
 
 	setAttribute() {}
+
+	focus() {
+		this.focused = true;
+	}
+
+	querySelector(selector: string) {
+		if (selector !== '.password-editor-value') return null;
+		return descendants(this).find((element) => element.className.includes('password-editor-value')) || null;
+	}
 
 	addEventListener(name: string, callback: () => void) {
 		const callbacks = this.listeners.get(name) || [];
@@ -54,6 +64,21 @@ function descendants(root: TestElement): TestElement[] {
 }
 
 describe('password editor and reader behavior', () => {
+	it('focuses the visible password name field instead of the hidden note title', () => {
+		const title = new TestElement();
+		const passwordFields = new TestElement();
+		const name = new TestElement();
+		name.className = 'input password-editor-value';
+		passwordFields.append(name);
+
+		focusComposerPrimaryField('password', title as never, passwordFields as never);
+		expect(name.focused).toBe(true);
+		expect(title.focused).toBe(false);
+
+		focusComposerPrimaryField('note', title as never, passwordFields as never);
+		expect(title.focused).toBe(true);
+	});
+
 	it('creates fixed password fields, adds and removes a custom field through editor controls', () => {
 		const restore = installDocument();
 		try {
