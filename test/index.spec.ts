@@ -237,6 +237,34 @@ describe('private-notes worker', () => {
 		expect(await sharePage.text()).toContain('查看并销毁');
 	});
 
+	it('serves folder controls and settings drawer logout behavior', async () => {
+		const appHtml = await (await env.ASSETS.fetch(new Request(`${ORIGIN}/`))).text();
+		expect(appHtml).toContain('id="folderList"');
+		expect(appHtml).toContain('id="folderDialogMode"');
+		expect(appHtml).toContain('id="saveFolderBtn"');
+		const settingsStart = appHtml.indexOf('id="settingsPanel"');
+		const securityIndex = appHtml.indexOf('id="securityPanel"', settingsStart);
+		const logoutIndex = appHtml.indexOf('id="settingsLogoutBtn"', settingsStart);
+		const settingsEnd = appHtml.indexOf('</aside>', settingsStart);
+		expect(settingsStart).toBeGreaterThanOrEqual(0);
+		expect(securityIndex).toBeGreaterThan(settingsStart);
+		expect(logoutIndex).toBeGreaterThan(securityIndex);
+		expect(settingsEnd).toBeGreaterThan(logoutIndex);
+		expect(appHtml).not.toContain('id="logoutBtn"');
+
+		const appScript = await (await env.ASSETS.fetch(new Request(`${ORIGIN}/app.js`))).text();
+		expect(appScript).toContain('async function saveFolder()');
+		expect(appScript).toContain("await encryptValue(name)");
+		expect(appScript).toContain("api('/api/folders'");
+		expect(appScript).toContain("method: 'POST'");
+		expect(appScript).toContain("method: 'PUT'");
+		expect(appScript).toContain("method: 'DELETE'");
+		expect(appScript).toContain('state.activeFolderId = null;');
+		expect(appScript).toContain("button.setAttribute('aria-current', 'page')");
+		expect(appScript).toContain('state.settingsReturnFocus');
+		expect(appScript).toContain('returnFocus.focus();');
+	});
+
 	it('applies public branding variables to app pages and the PWA manifest', async () => {
 		const brandedEnv = {
 			...env,

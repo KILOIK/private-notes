@@ -55,6 +55,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorFolderId: string | null
  * settingsReturnFocus: HTMLElement | null
  * folderReturnFocus: HTMLElement | null
+ * editingFolderId: string | null
  * }} */
 const state = {
   notes: [],
@@ -95,7 +96,8 @@ const state = {
   editorPasswordFields: [],
   editorFolderId: null,
   settingsReturnFocus: null,
-  folderReturnFocus: null
+  folderReturnFocus: null,
+  editingFolderId: null
 };
 /**
  * @param {string} id
@@ -215,6 +217,8 @@ const els = {
   categoryNav: getElement('categoryNav'),
   folderNav: getElement('folderNav'),
   folderDialog: getElement('folderDialog'),
+  folderList: getElement('folderList'),
+  folderDialogMode: getElement('folderDialogMode'),
   manageFoldersBtn: getButton('manageFoldersBtn'),
   closeFolderDialogBtn: getButton('closeFolderDialogBtn'),
   cancelFolderBtn: getButton('cancelFolderBtn'),
@@ -293,6 +297,10 @@ function closeSettings() {
 
 function openFolderDialog() {
   state.folderReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  state.editingFolderId = null;
+  els.folderDialogMode.textContent = '新建文件夹';
+  els.saveFolderBtn.textContent = '保存文件夹';
+  renderFolderManager();
   els.folderDialog.classList.remove('hidden');
   els.folderDialog.setAttribute('aria-hidden', 'false');
   updateModalUi();
@@ -303,6 +311,9 @@ function closeFolderDialog() {
   els.folderDialog.classList.add('hidden');
   els.folderDialog.setAttribute('aria-hidden', 'true');
   els.folderNameInput.value = '';
+  state.editingFolderId = null;
+  els.folderDialogMode.textContent = '新建文件夹';
+  els.saveFolderBtn.textContent = '保存文件夹';
   updateModalUi();
   const returnFocus = state.folderReturnFocus;
   state.folderReturnFocus = null;
@@ -340,6 +351,98 @@ function renderFolders() {
     els.folderNav.appendChild(button);
   });
   renderFilterNav();
+}
+
+function renderFolderManager() {
+  els.folderList.replaceChildren();
+  if (!state.folders.length) {
+    const empty = document.createElement('div');
+    empty.className = 'folder-manager-empty';
+    empty.textContent = '还没有文件夹';
+    els.folderList.appendChild(empty);
+    return;
+  }
+  state.folders.forEach(function (folder) {
+    const row = document.createElement('div');
+    row.className = 'folder-manager-row';
+    const name = document.createElement('span');
+    name.className = 'folder-manager-name';
+    name.textContent = folder.name;
+    const actions = document.createElement('div');
+    actions.className = 'folder-manager-actions';
+    const rename = document.createElement('button');
+    rename.type = 'button';
+    rename.className = 'btn secondary';
+    rename.textContent = '重命名';
+    rename.onclick = function () {
+      state.editingFolderId = folder.id;
+      els.folderDialogMode.textContent = '重命名文件夹';
+      els.saveFolderBtn.textContent = '保存修改';
+      els.folderNameInput.value = folder.name;
+      els.folderNameInput.focus();
+      els.folderNameInput.select();
+    };
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn danger';
+    remove.textContent = '删除';
+    remove.onclick = function () {
+      deleteFolder(folder).catch(function (error) {
+        setStatus(error instanceof Error ? error.message : '删除文件夹失败');
+      });
+    };
+    actions.append(rename, remove);
+    row.append(name, actions);
+    els.folderList.appendChild(row);
+  });
+}
+
+async function saveFolder() {
+  const name = els.folderNameInput.value.trim();
+  if (!name) {
+    setStatus('请输入文件夹名称');
+    els.folderNameInput.focus();
+    return;
+  }
+  const encryptedName = await encryptValue(name);
+  if (state.editingFolderId) {
+    const folder = state.folderMap.get(state.editingFolderId);
+    if (!folder) throw new Error('文件夹已不存在');
+    await api('/api/folders/' + encodeURIComponent(folder.id), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: encryptedName, revision: folder.updated_at })
+    });
+  } else {
+    await api('/api/folders', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: crypto.randomUUID(), name: encryptedName })
+    });
+  }
+  state.editingFolderId = null;
+  els.folderNameInput.value = '';
+  els.folderDialogMode.textContent = '新建文件夹';
+  els.saveFolderBtn.textContent = '保存文件夹';
+  await refreshFolders();
+  renderFolderManager();
+  setStatus('文件夹已保存');
+}
+
+/** @param {{ id: string, name: string }} folder */
+async function deleteFolder(folder) {
+  if (!window.confirm(`删除文件夹“${folder.name}”？其中笔记会归入未分类。`)) return;
+  await api('/api/folders/' + encodeURIComponent(folder.id), { method: 'DELETE' });
+  if (state.activeFolderId === folder.id) state.activeFolderId = null;
+  if (state.editingFolderId === folder.id) {
+    state.editingFolderId = null;
+    els.folderNameInput.value = '';
+    els.folderDialogMode.textContent = '新建文件夹';
+    els.saveFolderBtn.textContent = '保存文件夹';
+  }
+  await refreshFolders();
+  renderFolderManager();
+  setStatus('文件夹已删除，原笔记已归入未分类');
 }
 
 function updateLoginMode() {
@@ -746,8 +849,9 @@ async function refreshFolders() {
   state.allNotes.forEach(function (note) {
     if (note.record) note.folderName = resolveFolderName(state.folderMap, note.record.folderId);
   });
-  if (state.activeFolderId && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = undefined;
+  if (typeof state.activeFolderId === 'string' && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = null;
   renderFolders();
+  if (!els.folderDialog.classList.contains('hidden')) renderFolderManager();
   applySearch();
 }
 
@@ -835,6 +939,11 @@ els.folderNav.addEventListener('click', function (event) {
 els.manageFoldersBtn.onclick = openFolderDialog;
 els.closeFolderDialogBtn.onclick = closeFolderDialog;
 els.cancelFolderBtn.onclick = closeFolderDialog;
+els.saveFolderBtn.onclick = function () {
+  saveFolder().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '保存文件夹失败');
+  });
+};
 
 function updateTotpUi() {
   const enrollmentOpen = !els.totpEnrollmentPanel.classList.contains('hidden');
@@ -1904,6 +2013,7 @@ els.fabTopBtn.onclick = function () {
 async function logout() {
   await discardAttachmentDraft();
   await api('/api/logout', { method: 'POST' });
+  closeSettings();
   clearAttachmentUrls();
   closeComposer(false);
   closeShareDialog(true);

@@ -259,6 +259,12 @@ button, input, textarea { font: inherit; }
 .password-fields, .password-editor-fields { display:grid; gap:10px; margin-top:16px; }
 .per-field-copy { color:var(--muted); font-size:12px; }
 .folder-dialog-card { width:min(520px, 100%); }
+.folder-manager-list { display:grid; gap:8px; margin-bottom:18px; max-height:40vh; overflow-y:auto; }
+.folder-manager-empty { color:var(--muted); font-size:13px; padding:12px 0; }
+.folder-manager-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--panel-border); border-radius:12px; }
+.folder-manager-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.folder-manager-actions { display:flex; gap:8px; flex:0 0 auto; }
+.folder-manager-actions .btn { min-height:34px; padding:0 11px; }
 .search-wrap {
   position: relative;
   width: min(360px, 100%);
