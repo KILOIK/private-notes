@@ -17,6 +17,13 @@ describe('workspace presentation', () => {
 		expect(getWorkspacePresentation(1440, null, true)).toMatchObject({ mode: 'wide', showNavigation: true, navigationOpen: false });
 	});
 
+	it('returns from mobile reader to list without opening navigation', () => {
+		const reader = getWorkspacePresentation(430, 'n1', false);
+		const list = getWorkspacePresentation(430, null, reader.navigationOpen);
+		expect(reader.activeView).toBe('reader');
+		expect(list).toMatchObject({ activeView: 'list', showList: true, showReader: false, navigationOpen: false });
+	});
+
 	it('keeps password-wide operations unavailable', () => {
 		expect(getReaderActionModel({ type: 'note' })).toEqual({ copyVisible: true, shareVisible: true, editVisible: true });
 		expect(getReaderActionModel({ type: 'password' })).toEqual({ copyVisible: false, shareVisible: false, editVisible: true });

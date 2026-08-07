@@ -309,6 +309,7 @@ function openNavigation() {
   state.navigationReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   state.navigationOpen = true;
   syncWorkspacePresentation();
+  setNavigationBackgroundInert(getWorkspacePresentation(window.innerWidth, state.readerNoteId, state.navigationOpen).navigationModal);
   els.workspaceNavigation.focus();
 }
 
@@ -316,6 +317,7 @@ function openNavigation() {
 function closeNavigation(restoreFocus = true) {
   state.navigationOpen = false;
   syncWorkspacePresentation();
+  setNavigationBackgroundInert(false);
   const returnFocus = state.navigationReturnFocus;
   state.navigationReturnFocus = null;
   if (restoreFocus && returnFocus?.isConnected) returnFocus.focus();
@@ -325,22 +327,51 @@ let resizeFrame = 0;
 function handleWorkspaceResize() {
   window.cancelAnimationFrame(resizeFrame);
   resizeFrame = window.requestAnimationFrame(function () {
-    if (getWorkspaceMode(window.innerWidth) === 'wide') state.navigationOpen = false;
+    if (getWorkspaceMode(window.innerWidth) === 'wide') {
+      state.navigationOpen = false;
+      setNavigationBackgroundInert(false);
+    }
     syncWorkspacePresentation();
   });
 }
 
-function getDrawerFocusable() {
-  return /** @type {HTMLElement[]} */ (Array.from(els.settingsPanel.querySelectorAll(
+/** @param {HTMLElement} container */
+function getFocusableElements(container) {
+  return /** @type {HTMLElement[]} */ (Array.from(container.querySelectorAll(
     'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
   )).filter(function (element) {
     return element instanceof HTMLElement && element.getClientRects().length > 0;
   }));
 }
 
+/** @param {KeyboardEvent} event @param {HTMLElement} container */
+function trapFocus(event, container) {
+  const focusable = getFocusableElements(container);
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (!first || !last) {
+    event.preventDefault();
+    container.focus();
+  } else if (!(active instanceof HTMLElement) || !container.contains(active) || !focusable.includes(active)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey ? active === first : active === last) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  }
+}
+
 /** @param {boolean} inert */
 function setSettingsBackgroundInert(inert) {
   [els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
+    element.inert = inert;
+  });
+}
+
+/** @param {boolean} inert */
+function setNavigationBackgroundInert(inert) {
+  [els.topbar, els.feedView, els.readerView, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
     element.inert = inert;
   });
 }
@@ -1007,6 +1038,8 @@ els.categoryNav.addEventListener('click', function (event) {
   if (category !== 'all' && category !== 'note' && category !== 'password') return;
   state.activeCategory = category;
   applySearch();
+  if (state.workspaceMode !== 'wide') closeNavigation(false);
+  els.noteListScroll.scrollTop = 0;
 });
 
 els.folderNav.addEventListener('click', function (event) {
@@ -1015,6 +1048,8 @@ els.folderNav.addEventListener('click', function (event) {
   const folderId = target.dataset.folderId || '';
   state.activeFolderId = folderId === '' ? undefined : folderId === '__uncategorized__' ? null : folderId;
   applySearch();
+  if (state.workspaceMode !== 'wide') closeNavigation(false);
+  els.noteListScroll.scrollTop = 0;
 });
 els.manageFoldersBtn.onclick = openFolderDialog;
 els.closeFolderDialogBtn.onclick = closeFolderDialog;
@@ -2197,45 +2232,11 @@ els.copyShareLinkBtn.onclick = function () {
 
 document.addEventListener('keydown', function (event) {
   if (event.key === 'Tab' && !els.settingsPanel.classList.contains('hidden')) {
-    const focusable = getDrawerFocusable();
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const activeElement = document.activeElement;
-    if (!first || !last) {
-      event.preventDefault();
-      els.settingsPanel.focus();
-    } else if (!(activeElement instanceof HTMLElement) || !els.settingsPanel.contains(activeElement)) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    } else if (event.shiftKey && activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-  if (event.key === 'Tab' && !els.shareModal.classList.contains('hidden')) {
-    const focusable = /** @type {HTMLElement[]} */ (Array.from(els.shareModal.querySelectorAll(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-    )).filter(function (element) {
-      return element instanceof HTMLElement && element.getClientRects().length > 0;
-    }));
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const activeElement = document.activeElement;
-    if (!first || !last) {
-      event.preventDefault();
-      els.shareModal.focus();
-    } else if (!(activeElement instanceof HTMLElement) ||
-      !els.shareModal.contains(activeElement) ||
-      !focusable.includes(activeElement)) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    } else if (event.shiftKey ? activeElement === first : activeElement === last) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    }
+    trapFocus(event, els.settingsPanel);
+  } else if (event.key === 'Tab' && !els.shareModal.classList.contains('hidden')) {
+    trapFocus(event, els.shareModal);
+  } else if (event.key === 'Tab' && state.navigationOpen) {
+    trapFocus(event, els.workspaceNavigation);
   }
   if (event.key === 'Escape') {
     if (!els.settingsPanel.classList.contains('hidden')) {
@@ -2255,6 +2256,7 @@ document.addEventListener('keydown', function (event) {
       closeNavigation();
     } else if (!els.readerMoreMenu.classList.contains('hidden')) {
       els.readerMoreMenu.classList.add('hidden');
+      els.readerMoreBtn.setAttribute('aria-expanded', 'false');
       els.readerMoreBtn.focus();
     }
   }
