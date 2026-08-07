@@ -161,7 +161,6 @@ const els = {
   topbar: getElement('topbar'),
   searchInput: getInput('searchInput'),
   clearSearchBtn: getButton('clearSearchBtn'),
-  searchBtn: getButton('searchBtn'),
   newBtn: getButton('newBtn'),
   fabNewBtn: getButton('fabNewBtn'),
   fabTopBtn: getButton('fabTopBtn'),
@@ -186,6 +185,8 @@ const els = {
   noteCount: getElement('noteCount'),
   noteList: getElement('noteList'),
   readerView: getElement('readerView'),
+  readerEmptyState: getElement('readerEmptyState'),
+  readerDetail: getElement('readerDetail'),
   readerBackBtn: getButton('readerBackBtn'),
   readerMeta: getElement('readerMeta'),
   readerMoreBtn: getButton('readerMoreBtn'),
@@ -484,7 +485,6 @@ function updateLoginMode() {
 function updateVaultUi() {
   els.vaultPanel.classList.add('hidden');
   els.searchInput.disabled = !state.vaultUnlocked;
-  els.searchBtn.disabled = !state.vaultUnlocked;
   els.clearSearchBtn.disabled = !state.vaultUnlocked;
   els.newBtn.disabled = !state.vaultUnlocked;
   els.fabNewBtn.disabled = !state.vaultUnlocked;
@@ -1400,7 +1400,8 @@ async function openReader(noteId) {
   els.readerContent.classList.remove('hidden');
   els.passwordFields.replaceChildren();
   els.passwordFields.classList.add('hidden');
-  els.readerView.classList.remove('hidden');
+  els.readerEmptyState.classList.add('hidden');
+  els.readerDetail.classList.remove('hidden');
   const plan = buildReaderRenderPlan(note.record || decodeNoteRecord(note.content));
   if (!plan.renderMarkdown) {
     els.readerContent.classList.add('hidden');
@@ -1442,7 +1443,8 @@ function closeReader() {
   state.readerOperation.cancel();
   clearAttachmentUrls();
   state.readerNoteId = null;
-  els.readerView.classList.add('hidden');
+  els.readerEmptyState.classList.remove('hidden');
+  els.readerDetail.classList.add('hidden');
   els.readerMoreMenu.classList.add('hidden');
   els.readerTitle.textContent = '';
   els.readerMeta.textContent = '';
@@ -2028,18 +2030,9 @@ els.totpVerifyBtn.onclick = function () {
   });
 };
 
-els.searchBtn.onclick = function () {
-  applySearch();
-  setStatus('已在本地更新搜索结果');
-};
-
 els.searchInput.addEventListener('input', function () {
   updateSearchUi();
   applySearch();
-});
-
-els.searchInput.addEventListener('keydown', function (event) {
-  if (event.key === 'Enter') els.searchBtn.click();
 });
 
 els.clearSearchBtn.onclick = function () {
