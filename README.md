@@ -58,7 +58,7 @@ Cloudflare 会把项目克隆到你的 GitHub/GitLab 账号，自动创建 Worke
 
 - 使用长且唯一的登录密码，建议至少 12 个字符并保存到密码管理器。
 - 6 位数字虽然可以登录，但无法抵御数据库泄露后的离线穷举。
-- 确认 Deploy command 是 `npm run deploy`，这样会在部署后应用 D1 migrations；不要改成单独的 `npx wrangler deploy`。
+- 确认 Deploy command 是 `npm run deploy`。首次没有 D1 ID 时脚本会先部署以完成自动配置，再应用 migrations；已有 D1 的升级会先迁移再发布新 Worker。不要改成单独的 `npx wrangler deploy`。
 
 `COOKIE_SECRET` 不需要填写。省略时，Worker 会在自己的 D1 中并发安全地生成每个部署独有的 256 位随机签名密钥。`APP_PASSWORDS`、`APP_NAME`、`APP_SHORT_NAME`、`APP_DESCRIPTION` 都是部署后的可选高级设置，普通用户无需操作。
 
@@ -91,13 +91,12 @@ npm run enable:updates -- --push
 ```bash
 npm ci
 npx wrangler login
-npx wrangler deploy --secrets-file .dev.vars
-npm run db:migrations:apply
+npm run deploy
 ```
 
-如果已有生产 Worker，请先确认 `private-notes-r2` 已存在且 R2 绑定名称为 `ATTACHMENTS`，再运行部署和迁移。
+如果已有生产 Worker，请先确认 `private-notes-r2` 已存在且 R2 绑定名称为 `ATTACHMENTS`，再运行部署。需要通过本地 `.dev.vars` 首次设置 Secrets 时，可先执行 `npx wrangler secret bulk .dev.vars`。
 
-部署前复制 `.dev.vars.example` 为 `.dev.vars` 并替换 `APP_PASSWORD` 示例值；该文件已被 Git 忽略，不得提交。首次 `wrangler deploy` 会自动创建 D1 并把 ID 写回当前配置，随后 migrations 建立正式 schema。以后升级可直接运行 `npm run deploy`。生产升级应先在 staging D1 验证向后兼容性，并在迁移前记录 D1 Time Travel 恢复点。
+部署前复制 `.dev.vars.example` 为 `.dev.vars` 并替换 `APP_PASSWORD` 示例值；该文件已被 Git 忽略，不得提交。首次 `npm run deploy` 会在没有 D1 ID 时先让 Wrangler 自动创建并写回资源配置，随后 migrations 建立正式 schema。以后升级仍运行同一命令，但脚本检测到已有 D1 ID 后会先应用 migrations，再发布依赖新 schema 的 Worker。生产升级应先在 staging D1 验证向后兼容性，并在迁移前记录 D1 Time Travel 恢复点。
 
 ## 本地开发
 
@@ -121,7 +120,7 @@ npm run dev
 1. 保留当前 `APP_PASSWORD` 和数据库备份，不要先轮换密码。
 2. 在 Cloudflare 查看 D1 Time Travel 当前恢复点，并运行 `npx wrangler d1 migrations list DB --remote` 核对旧迁移记录。若旧 Worker 曾运行时修改 schema、但远程 migration journal 不完整，应先在 staging 修复记录冲突，不能直接套用生产迁移。
 3. 执行 `npm ci` 和 `npm run check`。
-4. 执行 `npm run deploy`；如果使用现有 Workers Builds Git 集成，确认 Deploy command 是 `npm run deploy`，不能只运行 `wrangler deploy` 跳过 D1 migrations。
+4. 执行 `npm run deploy`；已有 D1 的情况下该命令会先应用 migrations，再发布 Worker。如果使用现有 Workers Builds Git 集成，确认 Deploy command 是 `npm run deploy`，不能只运行 `wrangler deploy` 跳过 D1 migrations。
 5. 原有 Session 会失效。继续使用旧 `APP_PASSWORD` 完成第一次登录，让客户端原子初始化 vault salt/key-check。
 6. 确认旧密文可以解开后，才可修改 Worker 访问密码。之后首次用新密码登录会进入解锁界面，在那里输入旧 vault 密码。
 7. 检查页面是否提示“无法解密”或“待加密”，并对历史明文笔记逐条打开、保存。

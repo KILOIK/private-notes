@@ -929,13 +929,24 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		const attachmentIds = parseAttachmentIds(body.attachmentIds);
 		if (attachmentIds.length > 0) await validatePendingAttachmentIds(env, vaultId, id, attachmentIds);
 		const now = Date.now();
+		const attachmentGuard = attachmentIds.length > 0
+			? `AND (
+				SELECT COUNT(*) FROM note_attachments
+				WHERE vault_id = ? AND note_id = ? AND status = 'pending'
+				  AND id IN (${attachmentIds.map(() => '?').join(', ')})
+			) = ?`
+			: '';
 		const statements = [env.DB.prepare(
 			`INSERT INTO notes (id, vault_id, title, content, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?)
+			 SELECT ?, ?, ?, ?, ?, ?
+			 WHERE 1 = 1 ${attachmentGuard}
 			 ON CONFLICT(id) DO NOTHING
 			 RETURNING id, title, content, created_at, updated_at, updated_at AS revision`
 		)
-			.bind(id, vaultId, title, content, now, now)];
+			.bind(
+				id, vaultId, title, content, now, now,
+				...(attachmentIds.length > 0 ? [vaultId, id, ...attachmentIds, attachmentIds.length] : [])
+			)];
 		if (attachmentIds.length > 0) {
 			statements.push(
 				env.DB.prepare(
@@ -952,7 +963,12 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		}
 		const batchResult = await env.DB.batch(statements);
 		const note = (batchResult[0]?.results?.[0] as Note | undefined) ?? null;
-		if (!note) return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
+		if (!note) {
+			const existing = await getNote(env, id, vaultId);
+			if (existing) return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
+			if (attachmentIds.length > 0) await validatePendingAttachmentIds(env, vaultId, id, attachmentIds);
+			return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
+		}
 		return json({ ok: true, note }, 201);
 	}
 
@@ -983,15 +999,25 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 
 			const now = Date.now();
 			const nextRevision = now > Number(body.revision) ? now : Number(body.revision) + 1;
+			const attachmentGuard = attachmentIds.length > 0
+				? `AND (
+					SELECT COUNT(*) FROM note_attachments
+					WHERE vault_id = ? AND note_id = ? AND status IN ('pending', 'attached')
+					  AND id IN (${attachmentIds.map(() => '?').join(', ')})
+				) = ?`
+				: '';
 			const statements = [
 				env.DB.prepare(
 				`UPDATE notes
 				 SET title = ?,
 				     content = ?,
 				     updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
-				 WHERE id = ? AND vault_id = ? AND updated_at = ?
+				 WHERE id = ? AND vault_id = ? AND updated_at = ? ${attachmentGuard}
 				 RETURNING id, title, content, created_at, updated_at, updated_at AS revision`
-				).bind(title, content, now, now, id, vaultId, body.revision),
+				).bind(
+					title, content, now, now, id, vaultId, body.revision,
+					...(attachmentIds.length > 0 ? [vaultId, id, ...attachmentIds, attachmentIds.length] : [])
+				),
 			];
 			if (body.attachmentIds !== undefined) {
 				const omittedCondition = attachmentIds.length > 0 ? `AND id NOT IN (${attachmentIds.map(() => '?').join(', ')})` : '';
@@ -1023,6 +1049,7 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 			}
 			const existing = await getNote(env, id, vaultId);
 			if (!existing) return json({ ok: false, error: 'not_found' }, 404);
+			if (attachmentIds.length > 0) await validateAttachmentIds(env, vaultId, id, attachmentIds);
 			return json(
 				{ ok: false, error: 'revision_conflict', currentRevision: existing.revision },
 				409

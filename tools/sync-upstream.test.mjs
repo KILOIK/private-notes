@@ -105,9 +105,9 @@ test('keeps the runtime schema gate aligned with every D1 migration file', () =>
 	assert.deepEqual(runtimeNames, migrationNames);
 });
 
-test('deploys code before applying migrations so automatic D1 provisioning can run', () => {
+test('uses the deployment orchestrator so upgrades migrate before deploy while fresh installs can self-provision', () => {
 	const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-	assert.equal(packageJson.scripts.deploy, 'wrangler deploy && npm run db:migrations:apply');
+	assert.equal(packageJson.scripts.deploy, 'node tools/deploy.mjs');
 	assert.equal(packageJson.scripts['db:migrations:apply'], 'wrangler d1 migrations apply DB --remote');
 });
 

@@ -3,7 +3,7 @@ import { decodeNoteRecord } from './note-records.js';
 const UNCATEGORIZED_FOLDER_NAME = '未分类';
 
 /** @typedef {{ id: string, updated_at: number }} SortableFolder */
-/** @typedef {{ name: string }} DisplayFolder */
+/** @typedef {{ id?: string, name: string }} DisplayFolder */
 
 /** @template {SortableFolder} T @param {T[]} folders @returns {T[]} */
 export function sortFolders(folders) {
@@ -17,6 +17,23 @@ export function resolveFolderName(folderMap, folderId) {
   if (!folderId) return UNCATEGORIZED_FOLDER_NAME;
   const folder = folderMap.get(folderId);
   return folder ? folder.name : UNCATEGORIZED_FOLDER_NAME;
+}
+
+/**
+ * @param {Array<{ id: string, name: string }>} folders
+ * @param {string | null} selectedId
+ */
+export function buildComposerFolderChoices(folders, selectedId) {
+  const selected = typeof selectedId === 'string' && folders.some(function (folder) { return folder.id === selectedId; })
+    ? selectedId
+    : null;
+  return {
+    selectedId: selected,
+    choices: [
+      { id: null, name: UNCATEGORIZED_FOLDER_NAME },
+      ...folders.map(function (folder) { return { id: folder.id, name: folder.name }; })
+    ]
+  };
 }
 
 /**

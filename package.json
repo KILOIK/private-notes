@@ -9,7 +9,7 @@
     "build": "npm run typecheck",
     "check": "npm run typecheck && npm run typecheck:test && npm run typecheck:client && npm run test:tools && npm run test:ci",
     "predeploy": "npm run check",
-    "deploy": "wrangler deploy && npm run db:migrations:apply",
+    "deploy": "node tools/deploy.mjs",
     "deploy:dry-run": "wrangler deploy --dry-run",
     "dev": "wrangler dev",
     "start": "wrangler dev",

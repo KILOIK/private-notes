@@ -41,6 +41,25 @@ function isolatedD1Binding() {
 	});
 }
 
+function deleteAttachmentBeforeNextBatch(attachmentId: string) {
+	let armed = true;
+	return new Proxy(env.DB, {
+		get(target, property) {
+			if (property === 'batch') {
+				return async (statements: D1PreparedStatement[]) => {
+					if (armed) {
+						armed = false;
+						await target.prepare('DELETE FROM note_attachments WHERE id = ?').bind(attachmentId).run();
+					}
+					return target.batch(statements);
+				};
+			}
+			const value = Reflect.get(target, property, target);
+			return typeof value === 'function' ? value.bind(target) : value;
+		},
+	});
+}
+
 async function login(password = DEFAULT_PASSWORD, ip = `203.0.113.${Math.floor(Math.random() * 180) + 20}`) {
 	const response = await api('/api/login', {
 		method: 'POST',
@@ -1047,6 +1066,76 @@ describe('private-notes worker', () => {
 		await expect(
 			env.DB.prepare('SELECT status FROM note_attachments WHERE id = ?').bind(attachmentId).first()
 		).resolves.toMatchObject({ status: 'attached' });
+	});
+
+	it('does not create a note when a pending attachment disappears before the save batch', async () => {
+		const { cookie } = await login();
+		const noteId = crypto.randomUUID();
+		const upload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': noteId,
+				'x-note-draft': '1',
+				'x-mime-type': 'image/png',
+			},
+			body: new Uint8Array([51, 52]),
+		});
+		const attachmentId = String(((await jsonBody(upload)).attachment as JsonRecord).id);
+		const raceEnv = { ...env, DB: deleteAttachmentBeforeNextBatch(attachmentId) } as Parameters<typeof worker.fetch>[1];
+
+		const response = await worker.fetch(new Request(`${ORIGIN}/api/notes`, {
+			method: 'POST',
+			headers: { cookie, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				id: noteId,
+				title: encryptedValue('race-title'),
+				content: encryptedValue('race-content'),
+				attachmentIds: [attachmentId],
+			}),
+		}), raceEnv);
+
+		expect(response.status).toBe(400);
+		await expect(response.json()).resolves.toMatchObject({ code: 'invalid_attachment_ids' });
+		await expect(env.DB.prepare('SELECT id FROM notes WHERE id = ?').bind(noteId).first()).resolves.toBeNull();
+	});
+
+	it('does not update a note when an attachment disappears before the save batch', async () => {
+		const { cookie } = await login();
+		const noteId = crypto.randomUUID();
+		const original = await createNote(cookie, 'before-race', noteId);
+		const upload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': noteId,
+				'x-mime-type': 'image/png',
+			},
+			body: new Uint8Array([53, 54]),
+		});
+		const attachmentId = String(((await jsonBody(upload)).attachment as JsonRecord).id);
+		const raceEnv = { ...env, DB: deleteAttachmentBeforeNextBatch(attachmentId) } as Parameters<typeof worker.fetch>[1];
+
+		const response = await worker.fetch(new Request(`${ORIGIN}/api/notes/${noteId}`, {
+			method: 'PUT',
+			headers: { cookie, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				title: encryptedValue('after-race-title'),
+				content: encryptedValue('after-race-content'),
+				revision: Number(original.revision),
+				attachmentIds: [attachmentId],
+			}),
+		}), raceEnv);
+
+		expect(response.status).toBe(400);
+		await expect(response.json()).resolves.toMatchObject({ code: 'invalid_attachment_ids' });
+		await expect(env.DB.prepare('SELECT title, content, updated_at FROM notes WHERE id = ?').bind(noteId).first()).resolves.toMatchObject({
+			title: original.title,
+			content: original.content,
+			updated_at: original.updated_at,
+		});
 	});
 
 	it('leaves draft attachments pending when note creation fails', async () => {

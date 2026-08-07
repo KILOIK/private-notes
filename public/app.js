@@ -2,10 +2,13 @@ import { encryptSharedPayload } from './share-crypto.js';
 import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, extractAttachmentIds, renderMarkdown, insertMarkdownAtSelection } from './markdown.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImages, revokeAttachmentUrls } from './attachment-crypto.js';
 import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePendingToken } from './attachment-draft.js';
-import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
+import { buildComposerFolderChoices, matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
 import { buildNoteSaveContent, decodeNoteRecord, getSafeRecordText } from './note-records.js';
 import { createDefaultPasswordFields } from './password-fields.js';
 import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
+import { createLatestOperation } from './latest-operation.js';
+import { clearDecryptedNoteState } from './vault-ui-state.js';
+import { setComposerSaving } from './composer-saving.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -36,6 +39,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * unlockError: string,
  * appShortName: string,
  * readerNoteId: string | null,
+ * readerOperation: ReturnType<typeof createLatestOperation>,
  * editorMode: 'source' | 'preview',
  * attachmentUrls: Set<string>,
  * pendingAttachmentIds: string[],
@@ -53,6 +57,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorRecordType: 'note' | 'password'
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorFolderId: string | null
+ * composerSaving: boolean
  * settingsReturnFocus: HTMLElement | null
  * folderReturnFocus: HTMLElement | null
  * editingFolderId: string | null
@@ -78,6 +83,7 @@ const state = {
   unlockError: '',
   appShortName: document.documentElement.dataset.appShortName || '我的笔记',
   readerNoteId: null,
+  readerOperation: createLatestOperation(),
   editorMode: 'source',
   attachmentUrls: new Set(),
   pendingAttachmentIds: [],
@@ -95,6 +101,7 @@ const state = {
   editorRecordType: 'note',
   editorPasswordFields: [],
   editorFolderId: null,
+  composerSaving: false,
   settingsReturnFocus: null,
   folderReturnFocus: null,
   editingFolderId: null
@@ -190,6 +197,7 @@ const els = {
   editorModal: getElement('editorModal'),
   modalTitle: getElement('modalTitle'),
   editorTitle: getInput('editorTitle'),
+  editorFolder: getSelect('editorFolder'),
   passwordEditorFields: getElement('passwordEditorFields'),
   editorContent: getTextArea('editorContent'),
   editorToolbar: getElement('editorToolbar'),
@@ -554,13 +562,12 @@ function clearFolderState() {
 function lockVault(reason) {
   if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
   state.idleTimer = null;
-  clearAttachmentUrls();
   clearFolderState();
   state.vaultUnlocked = false;
   state.vaultKey = null;
   state.cryptoConfig = null;
-  state.readerNoteId = null;
-  els.readerView.classList.add('hidden');
+  clearDecryptedNoteState(state);
+  closeReader();
   closeComposer();
   closeSettings();
   closeFolderDialog();
@@ -573,6 +580,7 @@ function lockVault(reason) {
     state.authMode = 'unlock';
   }
   showLogin();
+  renderList();
   setStatus(reason === 'idle' ? '已锁定：超过 30 分钟无操作，请重新验证' : '需要重新验证');
 }
 
@@ -852,6 +860,7 @@ async function refreshFolders() {
   if (typeof state.activeFolderId === 'string' && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = null;
   renderFolders();
   if (!els.folderDialog.classList.contains('hidden')) renderFolderManager();
+  if (!els.editorModal.classList.contains('hidden')) renderComposerFolderSelect();
   applySearch();
 }
 
@@ -1240,7 +1249,7 @@ function renderList() {
       card.appendChild(meta);
       card.appendChild(actions);
       actions.appendChild(copyBtn);
-      actions.appendChild(shareBtn);
+      if (copyText !== null) actions.appendChild(shareBtn);
       actions.appendChild(editBtn);
       actions.appendChild(moreWrap);
       card.appendChild(title);
@@ -1295,6 +1304,28 @@ function renderPasswordEditorFields() {
   });
 }
 
+/** @param {boolean} saving */
+function updateComposerSaving(saving) {
+  setComposerSaving(state, {
+    saveButton: els.saveBtn,
+    cancelButton: els.cancelBtn,
+    closeButton: els.closeModalBtn,
+    modal: els.editorModal
+  }, saving);
+}
+
+function renderComposerFolderSelect() {
+  const model = buildComposerFolderChoices(state.folders, state.editorFolderId);
+  state.editorFolderId = model.selectedId;
+  els.editorFolder.replaceChildren(...model.choices.map(function (choice) {
+    const option = document.createElement('option');
+    option.value = choice.id || '';
+    option.textContent = choice.name;
+    option.selected = choice.id === model.selectedId;
+    return option;
+  }));
+}
+
 /** @param {any} record */
 function renderPasswordReaderFields(record) {
   if (!record || record.type !== 'password' || !Array.isArray(record.fields)) throw new Error('无效的密码记录');
@@ -1318,6 +1349,7 @@ function openComposer(note) {
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? note.title : '';
   els.editorContent.value = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
+  renderComposerFolderSelect();
   updateComposerRecordType(recordType);
   setAttachmentStatus('');
   els.editorModal.classList.remove('hidden');
@@ -1336,6 +1368,10 @@ function closeComposer(discardDraft = true) {
   state.editingId = null;
   state.editorPasswordFields = [];
   state.editorFolderId = null;
+  els.editorTitle.value = '';
+  els.editorContent.value = '';
+  els.passwordEditorFields.replaceChildren();
+  els.editorPreview.replaceChildren();
   setAttachmentStatus('');
   updateModalUi();
 }
@@ -1346,6 +1382,7 @@ async function openReader(noteId) {
   if (!note || note.decryptFailed) throw new Error('找不到可阅读的笔记');
   if (!state.vaultKey) throw new Error('请先解锁内容');
   const vaultKey = state.vaultKey;
+  const operationId = state.readerOperation.begin();
   clearAttachmentUrls();
   state.readerNoteId = noteId;
   els.readerTitle.textContent = note.title || '无标题';
@@ -1366,14 +1403,20 @@ async function openReader(noteId) {
   const attachmentMap = new Map();
   if (plan.attachmentIds.length) {
     const listed = await api('/api/attachments?noteId=' + encodeURIComponent(note.id));
+    if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
     const allowed = new Map((/** @type {Array<{ id: string, mime_type: string }>} */ (listed.attachments || [])).map(function (item) { return [item.id, item]; }));
     for (const id of plan.attachmentIds) {
+      if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
       const metadata = allowed.get(id);
       if (!metadata) continue;
       try {
         const response = await fetch('/api/attachments/' + encodeURIComponent(id), { credentials: 'same-origin' });
+        if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
         if (!response.ok) throw new Error('attachment unavailable');
-        const blob = await decryptAttachment(await response.arrayBuffer(), metadata.mime_type, vaultKey);
+        const ciphertext = await response.arrayBuffer();
+        if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
+        const blob = await decryptAttachment(ciphertext, metadata.mime_type, vaultKey);
+        if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
         const url = URL.createObjectURL(blob);
         state.attachmentUrls.add(url);
         attachmentMap.set(id, url);
@@ -1382,14 +1425,20 @@ async function openReader(noteId) {
       }
     }
   }
+  if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
   els.readerContent.append(renderMarkdown(plan.markdown, attachmentMap));
 }
 
 function closeReader() {
+  state.readerOperation.cancel();
   clearAttachmentUrls();
   state.readerNoteId = null;
   els.readerView.classList.add('hidden');
   els.readerMoreMenu.classList.add('hidden');
+  els.readerTitle.textContent = '';
+  els.readerMeta.textContent = '';
+  els.readerContent.replaceChildren();
+  els.passwordFields.replaceChildren();
 }
 
 function updateEditorPreview() {
@@ -1450,6 +1499,9 @@ function queueEditorImage(image) {
 }
 
 async function saveComposer() {
+  if (state.composerSaving) return;
+  updateComposerSaving(true);
+  try {
   const password = state.editorRecordType === 'password';
   const passwordPayload = password ? buildPasswordSavePayload(state.editorPasswordFields, state.editorFolderId) : null;
   const title = passwordPayload ? passwordPayload.title : (els.editorTitle.value.trim() || '无标题');
@@ -1514,6 +1566,9 @@ async function saveComposer() {
   closeComposer(false);
   await refreshNotes();
   setStatus('已保存');
+  } finally {
+    updateComposerSaving(false);
+  }
 }
 
 /** @param {string} id */
@@ -2054,6 +2109,9 @@ els.readerDeleteBtn.onclick = function () {
   if (!state.readerNoteId) return;
   deleteNote(state.readerNoteId).then(closeReader).catch(function (error) { setStatus(error.message || '删除失败'); });
 };
+els.editorFolder.onchange = function () {
+  state.editorFolderId = els.editorFolder.value || null;
+};
 els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { setStatus(error.message || '绑定失败'); }); };
 els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };
 els.disableTotpBtn.onclick = function () { disableTotp().catch(function (error) { setStatus(error.message || '关闭失败'); }); };
@@ -2198,7 +2256,8 @@ document.addEventListener('keydown', function (event) {
       event.preventDefault();
       closeShareDialog();
     } else if (!els.editorModal.classList.contains('hidden')) {
-      closeComposer();
+      if (state.composerSaving) setStatus('正在保存，请稍候');
+      else closeComposer();
     } else if (!els.readerMoreMenu.classList.contains('hidden')) {
       els.readerMoreMenu.classList.add('hidden');
       els.readerMoreBtn.focus();

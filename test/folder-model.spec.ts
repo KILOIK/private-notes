@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesNoteFilter, resolveFolderName, sortFolders } from '../public/folder-model.js';
+import { buildComposerFolderChoices, matchesNoteFilter, resolveFolderName, sortFolders } from '../public/folder-model.js';
 
 describe('folder model', () => {
 	it('sorts folders by newest update and then id', () => {
@@ -19,6 +19,23 @@ describe('folder model', () => {
 		expect(resolveFolderName(folders, 'folder-1')).toBe('工作');
 		expect(resolveFolderName(folders, null)).toBe('未分类');
 		expect(resolveFolderName(folders, 'deleted-folder')).toBe('未分类');
+	});
+
+	it('builds editor choices that allow moving a record and fall back when its folder was deleted', () => {
+		const folders = [
+			{ id: 'folder-1', name: '工作', updated_at: 20 },
+			{ id: 'folder-2', name: '个人', updated_at: 10 },
+		];
+
+		expect(buildComposerFolderChoices(folders, 'folder-2')).toEqual({
+			selectedId: 'folder-2',
+			choices: [
+				{ id: null, name: '未分类' },
+				{ id: 'folder-1', name: '工作' },
+				{ id: 'folder-2', name: '个人' },
+			],
+		});
+		expect(buildComposerFolderChoices(folders, 'deleted-folder').selectedId).toBeNull();
 	});
 
 	it('keeps categorized and uncategorized notes in the default all-folder selection', () => {
