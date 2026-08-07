@@ -78,7 +78,7 @@
   font-size: 16px;
 }
 
-.navigation-close,
+.workspace-navigation .navigation-close,
 #navigationBtn {
   display: none;
 }
@@ -574,7 +574,7 @@ a:focus-visible {
   }
 
   #navigationBtn,
-  .navigation-close {
+  .workspace-navigation .navigation-close {
     display: inline-grid;
   }
 
@@ -639,7 +639,7 @@ a:focus-visible {
   }
 
   #navigationBtn,
-  .navigation-close {
+  .workspace-navigation .navigation-close {
     display: inline-grid;
   }
 
