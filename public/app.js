@@ -551,7 +551,7 @@ async function discardAttachmentDraft() {
 }
 
 function clearFolderState() {
-  clearDecryptedFolderState(state);
+  clearDecryptedFolderState(state, els.editorFolder);
   renderFolders();
 }
 

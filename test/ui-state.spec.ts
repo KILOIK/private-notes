@@ -54,6 +54,41 @@ describe('sensitive UI state', () => {
 		expect(state.activeFolderId).toBeUndefined();
 	});
 
+	it('replaces decrypted composer folder options with the uncategorized fallback during vault cleanup', () => {
+		type TestOption = { tagName: string; value: string; textContent: string };
+		const editorFolder = {
+			children: [
+				{ tagName: 'OPTION', value: 'folder-1', textContent: '私密工作' },
+				{ tagName: 'OPTION', value: 'folder-2', textContent: '个人密码' },
+			] as TestOption[],
+			ownerDocument: {
+				createElement(tagName: string): TestOption {
+					return { tagName: tagName.toUpperCase(), value: '', textContent: '' };
+				},
+			},
+			replaceChildren(...children: TestOption[]) {
+				this.children = children;
+			},
+		};
+		const state = {
+			encryptedFolders: [{ id: 'folder-1', name: 'enc:v1:...' }],
+			folders: [{ id: 'folder-1', name: '私密工作' }],
+			folderMap: new Map([['folder-1', { id: 'folder-1', name: '私密工作' }]]),
+			activeCategory: 'all' as const,
+			activeFolderId: 'folder-1',
+		};
+		const clearWithComposer = clearDecryptedFolderState as unknown as (
+			folderState: typeof state,
+			folderSelect: typeof editorFolder
+		) => void;
+
+		clearWithComposer(state, editorFolder);
+
+		expect(editorFolder.children).toEqual([
+			{ tagName: 'OPTION', value: '', textContent: '未分类' },
+		]);
+	});
+
 	it('resets authentication state when logout or a revoked session ends the client session', () => {
 		const state = {
 			sessionAuthenticated: true,

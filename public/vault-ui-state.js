@@ -25,13 +25,23 @@ export function clearDecryptedNoteState(state) {
  *   activeCategory: 'all' | 'note' | 'password',
  *   activeFolderId: string | null | undefined
  * }} state
+ * @param {{
+ *   ownerDocument: { createElement(tagName: string): HTMLOptionElement },
+ *   replaceChildren(...nodes: HTMLOptionElement[]): void
+ * }} [editorFolder]
  */
-export function clearDecryptedFolderState(state) {
+export function clearDecryptedFolderState(state, editorFolder) {
   state.encryptedFolders = [];
   state.folders = [];
   state.folderMap = new Map();
   state.activeCategory = 'all';
   state.activeFolderId = undefined;
+  if (editorFolder) {
+    const fallback = editorFolder.ownerDocument.createElement('option');
+    fallback.value = '';
+    fallback.textContent = '未分类';
+    editorFolder.replaceChildren(fallback);
+  }
 }
 
 /**
