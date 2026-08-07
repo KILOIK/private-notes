@@ -1,0 +1,6 @@
+.workspace-layout,
+.workspace-navigation,
+.workspace-feed,
+.workspace-reader {
+  min-width: 0;
+}

@@ -209,11 +209,8 @@ describe('private-notes worker', () => {
 		expect(response.headers.get('content-type')).toContain('text/html');
 		const appHtml = await response.text();
 		expect(appHtml).toContain('Private Notes');
-		expect(appHtml).toContain('readerView');
 		expect(appHtml).toContain('editorToolbar');
 		expect(appHtml).toContain('totpChallengePanel');
-		expect(appHtml).toContain('categoryNav');
-		expect(appHtml).toContain('folderNav');
 		expect(appHtml).toContain('settingsBtn');
 		expect(appHtml).toContain('settingsPanel');
 		expect(appHtml).toContain('settingsLogoutBtn');
@@ -225,19 +222,21 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('id="mobilePasteStatus"');
 		expect(appHtml).toContain('aria-live="polite"');
 		expect(appHtml).not.toContain('id="logoutBtn"');
-		const shellStart = appHtml.indexOf('<main id="workspaceLayout" class="layout workspace-layout">');
-		const sidebarIndex = appHtml.indexOf('class="card workspace-sidebar"', shellStart);
-		const feedIndex = appHtml.indexOf('class="card feed"', shellStart);
-		const readerIndex = appHtml.indexOf('id="readerView"', shellStart);
-		expect(shellStart).toBeGreaterThanOrEqual(0);
-		expect(sidebarIndex).toBeGreaterThan(shellStart);
-		expect(feedIndex).toBeGreaterThan(sidebarIndex);
+		const requiredIds = ['navigationBtn', 'workspaceNavigation', 'closeNavigationBtn', 'navigationBackdrop',
+			'feedView', 'noteListScroll', 'readerEmptyState', 'readerDetail', 'readerCopyBtn',
+			'readerShareBtn', 'readerEditBtn', 'readerMoreBtn'];
+		for (const id of requiredIds) expect(appHtml).toContain(`id="${id}"`);
+		expect(appHtml).toContain('<link rel="stylesheet" href="/workspace.css" />');
+		expect(appHtml).not.toContain('class="card workspace-sidebar"');
+		expect(appHtml).not.toContain('class="card feed"');
+		expect(appHtml).not.toContain('id="searchBtn"');
+		const navigationIndex = appHtml.indexOf('id="workspaceNavigation"');
+		const feedIndex = appHtml.indexOf('id="feedView"');
+		const readerIndex = appHtml.indexOf('id="readerView"');
+		expect(feedIndex).toBeGreaterThan(navigationIndex);
 		expect(readerIndex).toBeGreaterThan(feedIndex);
-
-		const stylesResponse = await env.ASSETS.fetch(new Request(`${ORIGIN}/styles.css`));
-		const styles = await stylesResponse.text();
-		expect(styles).toContain('.workspace-layout {\n  grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr);');
-		expect(styles).not.toContain('.workspace-layout {\n  grid-template-columns: minmax(280px, .86fr) minmax(0, 1.14fr);');
+		const workspaceStyles = await env.ASSETS.fetch(new Request(`${ORIGIN}/workspace.css`));
+		expect(workspaceStyles.status).toBe(200);
 
 		const appScriptResponse = await env.ASSETS.fetch(new Request(`${ORIGIN}/app.js`));
 		const appScript = await appScriptResponse.text();
