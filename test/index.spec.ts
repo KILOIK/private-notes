@@ -245,6 +245,8 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('setSettingsBackgroundInert(true);');
 		expect(appScript).toContain('setSettingsBackgroundInert(false);');
 		expect(appScript).not.toContain('els.appView.inert = true;');
+		expect(appScript).toContain("from './workspace-view.js'");
+		expect(appScript).toContain('function syncWorkspacePresentation()');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);

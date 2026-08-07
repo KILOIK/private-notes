@@ -9,6 +9,7 @@ import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEdit
 import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { setComposerSaving } from './composer-saving.js';
+import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation } from './workspace-view.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -58,6 +59,10 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorFolderId: string | null
  * composerSaving: boolean
+ * workspaceMode: 'wide' | 'compact' | 'mobile'
+ * navigationOpen: boolean
+ * navigationReturnFocus: HTMLElement | null
+ * listScrollTop: number
  * settingsReturnFocus: HTMLElement | null
  * folderReturnFocus: HTMLElement | null
  * editingFolderId: string | null
@@ -102,6 +107,10 @@ const state = {
   editorPasswordFields: [],
   editorFolderId: null,
   composerSaving: false,
+  workspaceMode: getWorkspaceMode(window.innerWidth),
+  navigationOpen: false,
+  navigationReturnFocus: null,
+  listScrollTop: 0,
   settingsReturnFocus: null,
   folderReturnFocus: null,
   editingFolderId: null
@@ -171,6 +180,12 @@ const els = {
   statusLine: getElement('statusLine'),
   vaultPanel: getElement('vaultPanel'),
   workspaceLayout: getElement('workspaceLayout'),
+  workspaceNavigation: getElement('workspaceNavigation'),
+  navigationBtn: getButton('navigationBtn'),
+  closeNavigationBtn: getButton('closeNavigationBtn'),
+  navigationBackdrop: getButton('navigationBackdrop'),
+  feedView: getElement('feedView'),
+  noteListScroll: getElement('noteListScroll'),
   vaultPanelDesc: getElement('vaultPanelDesc'),
   vaultUnlockInput: getInput('vaultUnlockInput'),
   unlockBtn: getButton('unlockBtn'),
@@ -267,6 +282,47 @@ function updateModalUi() {
   });
   [els.loginView, els.appView, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
     element.inert = open;
+  });
+}
+
+function syncWorkspacePresentation() {
+  const view = getWorkspacePresentation(window.innerWidth, state.readerNoteId, state.navigationOpen);
+  state.workspaceMode = view.mode;
+  state.navigationOpen = view.navigationOpen;
+  els.workspaceLayout.dataset.mode = view.mode;
+  els.workspaceLayout.dataset.activeView = view.activeView;
+  els.workspaceNavigation.classList.toggle('is-open', view.showNavigation);
+  els.workspaceNavigation.setAttribute('aria-hidden', String(!view.showNavigation));
+  els.navigationBtn.setAttribute('aria-expanded', String(view.navigationOpen));
+  els.navigationBackdrop.classList.toggle('hidden', !view.navigationModal);
+  els.feedView.classList.toggle('is-hidden', !view.showList);
+  els.readerView.classList.toggle('is-hidden', !view.showReader);
+  els.readerBackBtn.classList.toggle('hidden', !view.showReaderBack);
+}
+
+function openNavigation() {
+  if (state.workspaceMode === 'wide') return;
+  state.navigationReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  state.navigationOpen = true;
+  syncWorkspacePresentation();
+  els.workspaceNavigation.focus();
+}
+
+/** @param {boolean} [restoreFocus] */
+function closeNavigation(restoreFocus = true) {
+  state.navigationOpen = false;
+  syncWorkspacePresentation();
+  const returnFocus = state.navigationReturnFocus;
+  state.navigationReturnFocus = null;
+  if (restoreFocus && returnFocus?.isConnected) returnFocus.focus();
+}
+
+let resizeFrame = 0;
+function handleWorkspaceResize() {
+  window.cancelAnimationFrame(resizeFrame);
+  resizeFrame = window.requestAnimationFrame(function () {
+    if (getWorkspaceMode(window.innerWidth) === 'wide') state.navigationOpen = false;
+    syncWorkspacePresentation();
   });
 }
 
@@ -1393,7 +1449,9 @@ async function openReader(noteId) {
   const vaultKey = state.vaultKey;
   const operationId = state.readerOperation.begin();
   clearAttachmentUrls();
+  if (state.workspaceMode === 'mobile') state.listScrollTop = els.noteListScroll.scrollTop;
   state.readerNoteId = noteId;
+  syncWorkspacePresentation();
   els.readerTitle.textContent = note.title || '无标题';
   els.readerMeta.textContent = '创建 ' + formatDate(note.created_at) + ' · 更新 ' + formatDate(note.updated_at);
   els.readerContent.replaceChildren();
@@ -1402,6 +1460,7 @@ async function openReader(noteId) {
   els.passwordFields.classList.add('hidden');
   els.readerEmptyState.classList.add('hidden');
   els.readerDetail.classList.remove('hidden');
+  els.readerView.scrollTop = 0;
   const plan = buildReaderRenderPlan(note.record || decodeNoteRecord(note.content));
   if (!plan.renderMarkdown) {
     els.readerContent.classList.add('hidden');
@@ -1442,7 +1501,6 @@ async function openReader(noteId) {
 function closeReader() {
   state.readerOperation.cancel();
   clearAttachmentUrls();
-  state.readerNoteId = null;
   els.readerEmptyState.classList.remove('hidden');
   els.readerDetail.classList.add('hidden');
   els.readerMoreMenu.classList.add('hidden');
@@ -1450,6 +1508,12 @@ function closeReader() {
   els.readerMeta.textContent = '';
   els.readerContent.replaceChildren();
   els.passwordFields.replaceChildren();
+  const restore = state.workspaceMode === 'mobile' ? state.listScrollTop : null;
+  state.readerNoteId = null;
+  syncWorkspacePresentation();
+  if (restore !== null) window.requestAnimationFrame(function () {
+    els.noteListScroll.scrollTop = restore;
+  });
 }
 
 function updateEditorPreview() {
@@ -2041,6 +2105,10 @@ els.clearSearchBtn.onclick = function () {
   applySearch();
 };
 
+els.navigationBtn.onclick = function () { openNavigation(); };
+els.closeNavigationBtn.onclick = function () { closeNavigation(); };
+els.navigationBackdrop.onclick = function () { closeNavigation(); };
+
 els.newBtn.onclick = function () {
   openComposer(null);
 };
@@ -2247,6 +2315,9 @@ document.addEventListener('keydown', function (event) {
     } else if (!els.editorModal.classList.contains('hidden')) {
       if (state.composerSaving) setStatus('正在保存，请稍候');
       else closeComposer();
+    } else if (state.navigationOpen) {
+      event.preventDefault();
+      closeNavigation();
     } else if (!els.readerMoreMenu.classList.contains('hidden')) {
       els.readerMoreMenu.classList.add('hidden');
       els.readerMoreBtn.focus();
@@ -2262,6 +2333,7 @@ document.addEventListener('keydown', function (event) {
 });
 
 window.addEventListener('scroll', updateScrollUi, { passive: true });
+window.addEventListener('resize', handleWorkspaceResize, { passive: true });
 
 ['pointerdown', 'keydown', 'touchstart'].forEach(function (eventName) {
   document.addEventListener(eventName, recordUserActivity, { passive: true });
@@ -2273,6 +2345,7 @@ document.addEventListener('visibilitychange', function () {
 updateSearchUi();
 updateScrollUi();
 updateModalUi();
+syncWorkspacePresentation();
 checkSession().catch(function (error) {
   showLogin();
   els.loginStatus.textContent = error instanceof Error ? error.message : '无法连接到服务';
