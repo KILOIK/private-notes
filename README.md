@@ -1,6 +1,6 @@
 # Private Notes
 
-一个部署在 Cloudflare Workers + D1 上的私人文本笔记应用。
+一个部署在 Cloudflare Workers + D1 + 私有 R2 上的客户端加密笔记与密码管理应用。
 
 - Workers 只处理 `/api/*`
 - HTML、CSS、JavaScript 由 Workers Static Assets 边缘分发
@@ -9,7 +9,9 @@
 - D1 保存密文、时间戳和登录限流状态；API 把单调的 `updated_at` 作为 revision token
 - 搜索、解密和筛选都在当前浏览器内完成
 - 支持多密码进入相互隔离的 vault
-- 手机优先的阅读/编辑界面，支持安全 Markdown 渲染、工具栏辅助编辑、粘贴/拖拽图片
+- 支持普通笔记和结构化密码记录；密码字段默认隐藏，并可逐字段复制
+- 支持一级文件夹；文件夹名称、类型、归属关系和密码字段都随笔记数据在客户端加密
+- 手机优先的阅读/编辑界面，支持安全 Markdown 渲染、工具栏辅助编辑，以及在正文中直接粘贴或拖拽图片
 - 整个部署共用一个 Authenticator；可使用恢复码，连续 30 分钟无操作后需要密码 + Authenticator 重新验证
 - 支持带有效期的一次性加密分享，收件人主动查看后从当前在线 D1 原子删除记录
 
@@ -19,7 +21,7 @@
 
 - 新建 vault 时，同一个密码用于 Worker 访问验证和浏览器派生解密密钥。
 - Worker Secret 中仍保存访问密码，因此 Worker/部署管理员属于可信边界。
-- 原始 D1 数据泄露时，标题和正文默认是密文；新 API 拒绝写入明文。
+- 原始 D1 数据泄露时，文件夹名称、标题、正文和密码字段默认是密文；新 API 拒绝写入明文。
 - 解密密钥只保存在当前页面内存，不写入 `localStorage`。
 - 未配置 `COOKIE_SECRET` 时，Worker 会在自己的 D1 `app_meta` 中原子生成并保存一段独立的 256 位随机签名密钥；它不会用于解密笔记，也不会返回客户端或写入日志。D1 管理员、备份和 Time Travel 因此仍属于可信边界。
 - 有效的显式 `COOKIE_SECRET` 始终优先，可用于把签名密钥与 D1 分离。切换或轮换签名密钥会让现有 Session 和尚未领取的分享链接失效。
@@ -41,6 +43,8 @@
 > 从旧版本升级时，第一次升级后登录必须继续使用旧 `APP_PASSWORD`，让客户端用原加密密码初始化 key-check。初始化成功后可以修改 Worker 访问密码，但必须保留旧 vault 密码；首次使用新访问密码登录时，页面会进入“已认证、待解锁”状态，再输入旧 vault 密码即可解密。删除旧密码前，应先完成全部笔记重加密并保留数据库备份。
 
 从旧版本升级后，如果数据库里仍有历史明文，页面会显示“待加密”。逐条打开并保存即可转换为客户端密文。
+
+旧版纯 Markdown 笔记不需要批量迁移：客户端会按旧格式读取，首次编辑保存时再写入带类型和文件夹信息的加密记录。
 
 ## 一键部署
 
@@ -66,7 +70,7 @@ npx wrangler r2 bucket create private-notes-r2
 
 不要给该 bucket 配置公开域名或公开读取策略。图片上传前会在浏览器加密，Worker 只接收密文；收件人查看分享时，图片密文作为分享密文的一部分传输，不会访问发送者的私有附件接口。
 
-部署完成后，在登录页的“安全设置”中绑定 Authenticator。绑定流程会显示一次性密钥和恢复码；请将恢复码离线保存。整个部署共用同一个 Authenticator，启用后所有 vault 登录及 30 分钟 idle reauth 都需要验证码。
+部署完成后，在应用右上角“设置”中绑定 Authenticator。绑定流程会显示一次性密钥和恢复码；恢复码只显示一次，必须离线保存。整个部署共用同一个 Authenticator，启用后所有 vault 登录及 30 分钟 idle reauth 都需要验证码。
 
 > Deploy Button 创建的是独立仓库，不是 GitHub Fork。这个项目升级频率较低，正常使用不需要配置同步。以后确实需要升级时，不要再次点击部署按钮，否则会创建新的 Worker/D1；应在原部署仓库中合并更新并继续复用现有数据库。
 
@@ -133,6 +137,9 @@ API 当前接受的标题/正文密文上限分别为 32,768/1,400,000 字符。
 - 删除冗余索引
 - 添加适用于 vault + keyset pagination 的复合索引
 - 新增只保存客户端密文的一次性分享表和过期时间索引
+- 通过 `0010_note_folders.sql` 新增一级文件夹表；`note_folders.name` 只保存客户端密文，删除文件夹不会删除笔记
+
+移动端正文粘贴图片时，浏览器会先创建随机草稿笔记 ID、生成本地预览并加密上传到私有 `private-notes-r2`。保存笔记时，D1 会在同一 batch 中创建笔记并把 pending 附件改为 attached；保存失败时附件保持 pending。取消编辑、退出登录、idle lock 或重新验证失败时，客户端会撤销临时 Blob URL 并请求清理当前 vault 的 pending 附件，服务端的过期清理仍作为兜底。
 
 ## 主要能力
 
@@ -142,7 +149,9 @@ API 当前接受的标题/正文密文上限分别为 32,768/1,400,000 字符。
 - 按 IP 的原子登录失败计数
 - 多 vault 数据隔离
 - 客户端 AES-GCM 加密
-- 浏览器端图片加密与私有 R2 附件
+- 普通笔记、结构化密码记录和逐字段复制
+- 一级加密文件夹；删除文件夹后笔记自动显示为“未分类”
+- 浏览器端图片加密、正文直接粘贴、多图草稿预览与私有 R2 附件
 - 安全 Markdown 阅读器与编辑辅助工具栏
 - set-once key-check，避免空 vault 使用错误密码初始化
 - 基于 `updated_at` 的 revision 乐观锁，避免多标签页静默覆盖或误删
@@ -181,7 +190,12 @@ public/
   styles.css
   app.js
   attachment-crypto.js
+  attachment-draft.js
+  folder-model.js
   markdown.js
+  note-records.js
+  password-fields.js
+  password-ui.js
   share.html
   share.css
   share.js
@@ -196,6 +210,7 @@ migrations/
   0001_init.sql
   ...
   0009_totp_sessions.sql
+  0010_note_folders.sql
 test/
   apply-migrations.ts
   index.spec.ts
@@ -214,6 +229,7 @@ wrangler.jsonc
 - 主要面向单人或少量独立 vault，不是多人协作系统。
 - 图片只支持 JPEG、PNG、GIF、WebP，单张原始图片最大 10 MiB；附件 bucket 必须由部署者自行创建并保持私有。
 - 当前 Markdown 渲染器覆盖标题、段落、列表、引用、代码块、行内强调、HTTP(S) 链接和 `attachment://` 图片引用；不会执行 HTML、脚本或任意协议链接。
+- 编辑器中的 `pending://` 图片引用只用于当前页面内的草稿预览；保存后会替换为 `attachment://`，阅读器不会解析或请求 `pending://` 资源。
 - 当前没有自动密码轮换或恢复密钥流程。
 - 当前没有分享列表或提前撤销界面；未领取的分享会在最长 7 天后过期，并在后续创建分享时清理。
 - Static Assets 提供应用外壳，但没有离线笔记同步。
