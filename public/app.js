@@ -2,7 +2,8 @@ import { encryptSharedPayload } from './share-crypto.js';
 import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, renderMarkdown, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImage, revokeAttachmentUrls } from './attachment-crypto.js';
 import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
-import { decodeNoteRecord, getSafeRecordText } from './note-records.js';
+import { decodeNoteRecord, encodePasswordRecord, getSafeRecordText } from './note-records.js';
+import { addCustomField, copyFieldValue, createDefaultPasswordFields, removeCustomField, toggleSecretVisibility } from './password-fields.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -46,6 +47,9 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * folderMap: Map<string, { id: string, name: string, created_at: number, updated_at: number }>,
  * activeCategory: 'all' | 'note' | 'password',
  * activeFolderId: string | null | undefined
+ * editorRecordType: 'note' | 'password'
+ * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
+ * editorFolderId: string | null
  * settingsReturnFocus: HTMLElement | null
  * folderReturnFocus: HTMLElement | null
  * }} */
@@ -83,6 +87,9 @@ const state = {
   folderMap: new Map(),
   activeCategory: 'all',
   activeFolderId: undefined,
+  editorRecordType: 'note',
+  editorPasswordFields: [],
+  editorFolderId: null,
   settingsReturnFocus: null,
   folderReturnFocus: null
 };
@@ -1129,16 +1136,179 @@ async function refreshNotes() {
   applySearch();
 }
 
+/** @param {'note' | 'password'} recordType */
+function updateComposerRecordType(recordType) {
+  const password = recordType === 'password';
+  state.editorRecordType = recordType;
+  els.editorTitle.classList.toggle('hidden', password);
+  els.passwordEditorFields.classList.toggle('hidden', !password);
+  els.editorContent.classList.toggle('hidden', password || state.editorMode === 'preview');
+  els.editorPreview.classList.add('hidden');
+  els.editorToolbar.classList.toggle('hidden', password);
+  els.attachmentDropZone.classList.toggle('hidden', password);
+  els.attachmentStatus.classList.toggle('hidden', password);
+  els.mobilePasteStatus.classList.toggle('hidden', password);
+  if (password) renderPasswordEditorFields();
+}
+
+function renderPasswordEditorFields() {
+  els.passwordEditorFields.replaceChildren();
+  const hint = document.createElement('span');
+  hint.className = 'per-field-copy';
+  hint.textContent = '密码字段默认隐藏；每个字段均可单独复制。';
+  els.passwordEditorFields.append(hint);
+
+  state.editorPasswordFields.forEach(function (field) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'password-field password-editor-field';
+    const label = document.createElement('label');
+    label.className = 'password-field-label';
+    label.textContent = field.label;
+    wrapper.append(label);
+
+    if (!['name', 'username', 'password', 'url', 'notes'].includes(field.id)) {
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.className = 'input password-custom-label';
+      labelInput.value = field.label;
+      labelInput.setAttribute('aria-label', '字段名称');
+      labelInput.addEventListener('input', function () {
+        field.label = labelInput.value;
+        label.textContent = field.label || '自定义字段';
+      });
+      wrapper.append(labelInput);
+    }
+
+    let input;
+    if (field.type === 'multiline') {
+      input = document.createElement('textarea');
+      input.className = 'textarea password-editor-value';
+      input.rows = 3;
+    } else {
+      input = document.createElement('input');
+      input.className = 'input password-editor-value';
+      input.type = field.type === 'secret' ? 'password' : 'text';
+    }
+    input.value = field.value;
+    input.setAttribute('aria-label', field.label);
+    input.addEventListener('input', function () {
+      field.value = input.value;
+    });
+    wrapper.append(input);
+
+    if (field.type === 'secret' && input instanceof HTMLInputElement) {
+      const visibility = document.createElement('button');
+      visibility.type = 'button';
+      visibility.className = 'btn secondary password-field-action';
+      visibility.textContent = '显示';
+      visibility.onclick = function () {
+        toggleSecretVisibility(input);
+        visibility.textContent = input.type === 'password' ? '显示' : '隐藏';
+      };
+      wrapper.append(visibility);
+    }
+
+    if (!['name', 'username', 'password', 'url', 'notes'].includes(field.id)) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn secondary password-field-action';
+      remove.textContent = '删除字段';
+      remove.onclick = function () {
+        state.editorPasswordFields = removeCustomField(state.editorPasswordFields, field.id);
+        renderPasswordEditorFields();
+      };
+      wrapper.append(remove);
+    }
+    els.passwordEditorFields.append(wrapper);
+  });
+
+  const customFields = document.createElement('div');
+  customFields.className = 'password-custom-actions';
+  ['text', 'secret', 'multiline'].forEach(function (type) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'btn secondary';
+    add.textContent = type === 'text' ? '添加文本字段' : type === 'secret' ? '添加隐藏字段' : '添加多行字段';
+    add.onclick = function () {
+      state.editorPasswordFields = addCustomField(state.editorPasswordFields, /** @type {'text' | 'secret' | 'multiline'} */ (type));
+      renderPasswordEditorFields();
+    };
+    customFields.append(add);
+  });
+  els.passwordEditorFields.append(customFields);
+}
+
+/** @param {any} record */
+function renderPasswordReaderFields(record) {
+  els.passwordFields.replaceChildren();
+  const fields = Array.isArray(record?.fields) ? record.fields : [];
+  fields.forEach(function (/** @type {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} */ field) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'password-field';
+    const label = document.createElement('label');
+    label.className = 'password-field-label';
+    label.textContent = String(field.label || '字段');
+    wrapper.append(label);
+
+    let input;
+    if (field.type === 'multiline') {
+      input = document.createElement('textarea');
+      input.className = 'textarea password-reader-value';
+      input.rows = 3;
+      input.readOnly = true;
+    } else {
+      input = document.createElement('input');
+      input.className = 'input password-reader-value';
+      input.type = field.type === 'secret' ? 'password' : 'text';
+      input.readOnly = true;
+    }
+    input.value = String(field.value || '');
+    input.setAttribute('aria-label', String(field.label || '字段'));
+    wrapper.append(input);
+
+    if (field.type === 'secret' && input instanceof HTMLInputElement) {
+      const visibility = document.createElement('button');
+      visibility.type = 'button';
+      visibility.className = 'btn secondary password-field-action';
+      visibility.textContent = '显示';
+      visibility.onclick = function () {
+        toggleSecretVisibility(input);
+        visibility.textContent = input.type === 'password' ? '显示' : '隐藏';
+      };
+      wrapper.append(visibility);
+    }
+
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn secondary per-field-copy';
+    copy.textContent = '复制';
+    copy.onclick = function () {
+      copyFieldValue(field.value, navigator.clipboard)
+        .then(function () { setStatus('字段已复制'); })
+        .catch(function () { setStatus('复制失败，请检查剪贴板权限'); });
+    };
+    wrapper.append(copy);
+    els.passwordFields.append(wrapper);
+  });
+}
+
 /** @param {Note | null} note */
 function openComposer(note) {
   state.editingId = note ? note.id : null;
   state.editorMode = 'source';
   state.pendingAttachmentIds = [];
-  els.modalTitle.textContent = note ? '编辑笔记' : '新建笔记';
+  const record = note ? (note.record || decodeNoteRecord(note.content)) : null;
+  const recordType = record?.type === 'password' || (!note && state.activeCategory === 'password') ? 'password' : 'note';
+  state.editorFolderId = note
+    ? (typeof record?.folderId === 'string' ? record.folderId : null)
+    : (typeof state.activeFolderId === 'string' ? state.activeFolderId : null);
+  state.editorPasswordFields = recordType === 'password' && Array.isArray(record?.fields)
+    ? record.fields.map(function (/** @type {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} */ field) { return { ...field }; })
+    : createDefaultPasswordFields();
+  els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? note.title : '';
-  els.editorContent.value = note ? note.content : '';
-  els.editorContent.classList.remove('hidden');
-  els.editorPreview.classList.add('hidden');
+  els.editorContent.value = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
+  updateComposerRecordType(recordType);
   els.attachmentStatus.textContent = '';
   els.editorModal.classList.remove('hidden');
   updateModalUi();
@@ -1149,6 +1319,8 @@ function closeComposer() {
   els.editorModal.classList.add('hidden');
   state.editingId = null;
   state.pendingAttachmentIds = [];
+  state.editorPasswordFields = [];
+  state.editorFolderId = null;
   els.attachmentStatus.textContent = '';
   updateModalUi();
 }
@@ -1172,10 +1344,7 @@ async function openReader(noteId) {
   if (!plan.renderMarkdown) {
     els.readerContent.classList.add('hidden');
     els.passwordFields.classList.remove('hidden');
-    const placeholder = document.createElement('p');
-    placeholder.className = 'password-fields-placeholder';
-    placeholder.textContent = '密码记录已安全保存。打开编辑可管理字段。';
-    els.passwordFields.append(placeholder);
+    renderPasswordReaderFields(note.record || decodeNoteRecord(note.content));
     return;
   }
 
@@ -1242,9 +1411,13 @@ async function uploadEditorImage(file) {
 }
 
 async function saveComposer() {
-  const title = els.editorTitle.value.trim() || '无标题';
-  const content = els.editorContent.value.trim();
-  if (!title && !content) {
+  const password = state.editorRecordType === 'password';
+  const nameField = state.editorPasswordFields.find(function (field) { return field.id === 'name'; });
+  const title = password ? String(nameField?.value || '') : (els.editorTitle.value.trim() || '无标题');
+  const content = password
+    ? encodePasswordRecord({ type: 'password', folderId: state.editorFolderId, fields: state.editorPasswordFields })
+    : els.editorContent.value.trim();
+  if (!password && !title && !content) {
     setStatus('标题和内容至少写一个');
     return;
   }

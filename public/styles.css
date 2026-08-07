@@ -912,6 +912,29 @@ button, input, textarea { font: inherit; }
   border-radius: 8px;
   font-size: 12px;
 }
+.password-editor-field {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.password-editor-value,
+.password-reader-value,
+.password-custom-label {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.password-editor-value.textarea,
+.password-reader-value.textarea {
+  min-height: 84px;
+}
+.password-field-action,
+.password-field .per-field-copy {
+  width: fit-content;
+  margin-top: 2px;
+}
+.password-custom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .more-menu {
   position: absolute;
   right: 22px;

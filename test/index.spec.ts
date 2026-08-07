@@ -229,6 +229,12 @@ describe('private-notes worker', () => {
 		expect(appScript).not.toContain('els.appView.inert = true;');
 		expect(appScript).not.toContain("value.textContent = String(field.value || '')");
 		expect(appScript).not.toContain('password-field-copy');
+		expect(appScript).toContain("from './password-fields.js'");
+		expect(appScript).toContain('function renderPasswordEditorFields()');
+		expect(appScript).toContain('function renderPasswordReaderFields(record)');
+		expect(appScript).toContain("input.type = field.type === 'secret' ? 'password' : 'text';");
+		expect(appScript).toContain('copyFieldValue(field.value, navigator.clipboard)');
+		expect(appScript).toContain('encodePasswordRecord({');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);
