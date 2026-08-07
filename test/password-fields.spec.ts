@@ -35,14 +35,14 @@ describe('password field helpers', () => {
 	});
 
 	it('toggles only the target secret input without returning its plaintext value', () => {
-		const first = { type: 'password', value: 'top-secret' } as HTMLInputElement;
-		const second = { type: 'password', value: 'other-secret' } as HTMLInputElement;
+		const first = { type: 'password', value: 'top-secret' };
+		const second = { type: 'password', value: 'other-secret' };
 
-		expect(toggleSecretVisibility(first)).toBeUndefined();
+		expect(toggleSecretVisibility(first as never)).toBeUndefined();
 		expect(first.type).toBe('text');
 		expect(first.value).toBe('top-secret');
 		expect(second.type).toBe('password');
-		expect(toggleSecretVisibility(first)).toBeUndefined();
+		expect(toggleSecretVisibility(first as never)).toBeUndefined();
 		expect(first.type).toBe('password');
 	});
 

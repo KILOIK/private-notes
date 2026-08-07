@@ -36,12 +36,17 @@ class TestElement {
 }
 
 function installDocument() {
-	const previous = globalThis.document;
-	Object.assign(globalThis, {
+	const runtime = globalThis as unknown as { document?: unknown; HTMLInputElement?: unknown };
+	const previousDocument = runtime.document;
+	const previousInputElement = runtime.HTMLInputElement;
+	Object.assign(runtime, {
 		document: { createElement: () => new TestElement() },
 		HTMLInputElement: TestElement,
 	});
-	return () => Object.assign(globalThis, { document: previous, HTMLInputElement: undefined });
+	return () => Object.assign(runtime, {
+		document: previousDocument,
+		HTMLInputElement: previousInputElement,
+	});
 }
 
 function descendants(root: TestElement): TestElement[] {
