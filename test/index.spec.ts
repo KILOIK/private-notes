@@ -976,6 +976,190 @@ describe('private-notes worker', () => {
 
 	});
 
+	it('uploads draft attachments before a note exists and atomically attaches them on note creation', async () => {
+		const { cookie } = await login();
+		const noteId = crypto.randomUUID();
+		const encryptedBytes = new Uint8Array([11, 12, 13, 14]);
+
+		const ordinaryUpload = await api('/api/attachments', {
+			method: 'POST',
+			headers: { cookie, 'content-type': 'application/octet-stream', 'x-note-id': noteId, 'x-mime-type': 'image/png' },
+			body: encryptedBytes,
+		});
+		expect(ordinaryUpload.status).toBe(404);
+
+		const draftUpload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': noteId,
+				'x-note-draft': '1',
+				'x-mime-type': 'image/png',
+			},
+			body: encryptedBytes,
+		});
+		expect(draftUpload.status).toBe(201);
+		const attachmentId = String(((await jsonBody(draftUpload)).attachment as JsonRecord).id);
+		await expect(
+			env.DB.prepare('SELECT note_id, status FROM note_attachments WHERE id = ?').bind(attachmentId).first()
+		).resolves.toMatchObject({ note_id: noteId, status: 'pending' });
+
+		const created = await api('/api/notes', {
+			method: 'POST',
+			headers: { cookie, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				id: noteId,
+				title: encryptedValue('draft-title'),
+				content: encryptedValue('draft-content'),
+				attachmentIds: [attachmentId],
+			}),
+		});
+		expect(created.status).toBe(201);
+		await expect(
+			env.DB.prepare('SELECT status FROM note_attachments WHERE id = ?').bind(attachmentId).first()
+		).resolves.toMatchObject({ status: 'attached' });
+	});
+
+	it('leaves draft attachments pending when note creation fails', async () => {
+		const { cookie } = await login();
+		const noteId = crypto.randomUUID();
+		await createNote(cookie, 'existing-note', noteId);
+		await env.DB.prepare('DELETE FROM notes WHERE id = ?').bind(noteId).run();
+		const upload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': noteId,
+				'x-note-draft': '1',
+				'x-mime-type': 'image/webp',
+			},
+			body: new Uint8Array([21, 22]),
+		});
+		expect(upload.status).toBe(201);
+		const attachmentId = String(((await jsonBody(upload)).attachment as JsonRecord).id);
+		await createNote(cookie, 'conflicting-note', noteId);
+
+		const failed = await api('/api/notes', {
+			method: 'POST',
+			headers: { cookie, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				id: noteId,
+				title: encryptedValue('replacement-title'),
+				content: encryptedValue('replacement-content'),
+				attachmentIds: [attachmentId],
+			}),
+		});
+		expect(failed.status).toBe(409);
+		await expect(
+			env.DB.prepare('SELECT status FROM note_attachments WHERE id = ?').bind(attachmentId).first()
+		).resolves.toMatchObject({ status: 'pending' });
+	});
+
+	it('denies cross-vault pending attachment association', async () => {
+		const owner = await login(DEFAULT_PASSWORD, '203.0.113.211');
+		const guest = await login(GUEST_PASSWORD, '203.0.113.212');
+		const noteId = crypto.randomUUID();
+		const upload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie: owner.cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': noteId,
+				'x-note-draft': '1',
+				'x-mime-type': 'image/gif',
+			},
+			body: new Uint8Array([31, 32]),
+		});
+		expect(upload.status).toBe(201);
+		const attachmentId = String(((await jsonBody(upload)).attachment as JsonRecord).id);
+
+		const denied = await api('/api/notes', {
+			method: 'POST',
+			headers: { cookie: guest.cookie, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				id: noteId,
+				title: encryptedValue('guest-title'),
+				content: encryptedValue('guest-content'),
+				attachmentIds: [attachmentId],
+			}),
+		});
+		expect(denied.status).toBe(400);
+		await expect(
+			env.DB.prepare('SELECT vault_id, status FROM note_attachments WHERE id = ?').bind(attachmentId).first()
+		).resolves.toMatchObject({ status: 'pending' });
+	});
+
+	it('allows reauth-required sessions to clean up only their pending draft attachment', async () => {
+		const { cookie } = await login();
+		const attachedNoteId = crypto.randomUUID();
+		await createNote(cookie, 'attached-before-reauth', attachedNoteId);
+		const attachedUpload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': attachedNoteId,
+				'x-mime-type': 'image/png',
+			},
+			body: new Uint8Array([39, 40]),
+		});
+		expect(attachedUpload.status).toBe(201);
+		const attachedId = String(((await jsonBody(attachedUpload)).attachment as JsonRecord).id);
+		const attachedNote = await jsonBody(await api(`/api/notes/${attachedNoteId}`, { headers: { cookie } }));
+		const attachedSave = await api(`/api/notes/${attachedNoteId}`, {
+			method: 'PUT',
+			headers: { cookie, 'content-type': 'application/json' },
+			body: JSON.stringify({
+				title: encryptedValue('attached-title'),
+				content: encryptedValue('attached-content'),
+				revision: Number((attachedNote.note as JsonRecord).revision),
+				attachmentIds: [attachedId],
+			}),
+		});
+		expect(attachedSave.status).toBe(200);
+
+		const noteId = crypto.randomUUID();
+		const upload = await api('/api/attachments', {
+			method: 'POST',
+			headers: {
+				cookie,
+				'content-type': 'application/octet-stream',
+				'x-note-id': noteId,
+				'x-note-draft': '1',
+				'x-mime-type': 'image/png',
+			},
+			body: new Uint8Array([41, 42]),
+		});
+		expect(upload.status).toBe(201);
+		const attachmentId = String(((await jsonBody(upload)).attachment as JsonRecord).id);
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?')
+			.bind(Date.now() - 30 * 60 * 1000 - 1)
+			.run();
+		const attachedDelete = await api(`/api/attachments/${attachedId}`, {
+			method: 'DELETE',
+			headers: { cookie },
+		});
+		expect(attachedDelete.status).toBe(404);
+		await expect(
+			env.DB.prepare('SELECT status FROM note_attachments WHERE id = ?').bind(attachedId).first()
+		).resolves.toMatchObject({ status: 'attached' });
+
+		const deleted = await api(`/api/attachments/${attachmentId}`, {
+			method: 'DELETE',
+			headers: { cookie },
+		});
+		expect(deleted.status).toBe(200);
+		await expect(
+			env.DB.prepare('SELECT status FROM note_attachments WHERE id = ?').bind(attachmentId).first()
+		).resolves.toMatchObject({ status: 'detached' });
+
+		const stillBlocked = await api('/api/notes', { headers: { cookie } });
+		expect(stillBlocked.status).toBe(401);
+		await expect(stillBlocked.json()).resolves.toMatchObject({ error: 'reauth_required' });
+	});
+
 	it('creates client-encrypted shares and atomically consumes them once', async () => {
 		const sharedPayload = {
 			v: 1,

@@ -90,7 +90,9 @@ export async function createAttachment(
 	const note = await env.DB.prepare('SELECT id FROM notes WHERE id = ? AND vault_id = ? LIMIT 1')
 		.bind(normalizedNoteId, vaultId)
 		.first<{ id: string }>();
-	if (!note) throw new AttachmentError(404, 'not_found', 'note not found');
+	if (!note && request.headers.get('x-note-draft') !== '1') {
+		throw new AttachmentError(404, 'not_found', 'note not found');
+	}
 
 	if (request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/octet-stream') {
 		throw new AttachmentError(415, 'unsupported_media_type', 'content-type must be application/octet-stream');
@@ -179,6 +181,26 @@ export async function detachAttachment(env: AttachmentEnv, ctx: ExecutionContext
 	return true;
 }
 
+export async function detachPendingAttachment(
+	env: AttachmentEnv,
+	ctx: ExecutionContext,
+	vaultId: string,
+	attachmentId: string
+) {
+	const id = normalizeUuid(attachmentId, 'attachmentId');
+	const row = await env.DB.prepare(
+		`UPDATE note_attachments
+		 SET status = 'detached', detached_at = ?
+		 WHERE id = ? AND vault_id = ? AND status = 'pending'
+		 RETURNING object_key`
+	)
+		.bind(Date.now(), id, vaultId)
+		.first<{ object_key: string }>();
+	if (!row) return false;
+	scheduleDetachedObjectDeletion(env, ctx, vaultId, [id]);
+	return true;
+}
+
 export function scheduleDetachedObjectDeletion(
 	env: AttachmentEnv,
 	ctx: ExecutionContext,
@@ -236,6 +258,24 @@ export async function validateAttachmentIds(env: AttachmentEnv, vaultId: string,
 	const found = new Set((result.results ?? []).map((row) => row.id));
 	if (found.size !== normalizedIds.length) {
 		throw new AttachmentError(400, 'invalid_attachment_ids', 'attachmentIds must belong to the note and vault');
+	}
+}
+
+export async function validatePendingAttachmentIds(env: AttachmentEnv, vaultId: string, noteId: string, ids: string[]) {
+	const normalizedNoteId = normalizeUuid(noteId, 'noteId');
+	const normalizedIds = [...new Set(ids.map((id) => normalizeUuid(id, 'attachmentId')))];
+	if (normalizedIds.length === 0) return;
+	const placeholders = normalizedIds.map(() => '?').join(', ');
+	const result = await env.DB.prepare(
+		`SELECT id FROM note_attachments
+		 WHERE vault_id = ? AND note_id = ? AND status = 'pending'
+		   AND id IN (${placeholders})`
+	)
+		.bind(vaultId, normalizedNoteId, ...normalizedIds)
+		.all<{ id: string }>();
+	const found = new Set((result.results ?? []).map((row) => row.id));
+	if (found.size !== normalizedIds.length) {
+		throw new AttachmentError(400, 'invalid_attachment_ids', 'attachmentIds must be pending for the note and vault');
 	}
 }
 

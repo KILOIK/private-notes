@@ -31,11 +31,13 @@ import {
 	AttachmentError,
 	createAttachment,
 	detachAttachment,
+	detachPendingAttachment,
 	getAttachment,
 	listAttachments,
 	scheduleDetachedObjectDeletion,
 	scheduleStaleAttachmentCleanup,
 	validateAttachmentIds,
+	validatePendingAttachmentIds,
 } from './attachments';
 
 type AppEnv = Omit<Env, 'APP_NAME' | 'APP_SHORT_NAME' | 'APP_DESCRIPTION'> & {
@@ -735,6 +737,18 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 
 	const session = url.pathname.startsWith('/api/') ? await getSession(request, env) : null;
 	if (session && !session.authenticated) return unauthorized();
+	const pendingCleanupMatch = /^\/api\/attachments\/([^/]+)$/.exec(url.pathname);
+	if (session?.reauthRequired && request.method === 'DELETE' && pendingCleanupMatch) {
+		let attachmentId: string;
+		try {
+			attachmentId = requireNoteId(decodeURIComponent(pendingCleanupMatch[1]), 'attachmentId');
+		} catch (error) {
+			if (error instanceof ApiError) throw error;
+			throw new ApiError(400, 'invalid_id', 'attachmentId must be a UUID');
+		}
+		const detached = await detachPendingAttachment(env, ctx, session.vaultId || 'default', attachmentId);
+		return detached ? json({ ok: true }) : json({ ok: false, error: 'not_found' }, 404);
+	}
 	if (session?.reauthRequired) return json({ ok: false, error: 'reauth_required' }, 401);
 	const shouldTouchActivity = Boolean(
 		session?.sessionId &&
@@ -913,27 +927,32 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		const content = requireEncryptedValue(body.content, 'content', MAX_ENCRYPTED_CONTENT_LENGTH);
 		const id = body.id === undefined ? crypto.randomUUID() : requireNoteId(body.id);
 		const attachmentIds = parseAttachmentIds(body.attachmentIds);
-		if (attachmentIds.length > 0) await validateAttachmentIds(env, vaultId, id, attachmentIds);
+		if (attachmentIds.length > 0) await validatePendingAttachmentIds(env, vaultId, id, attachmentIds);
 		const now = Date.now();
-
-		const note = await env.DB.prepare(
+		const statements = [env.DB.prepare(
 			`INSERT INTO notes (id, vault_id, title, content, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(id) DO NOTHING
 			 RETURNING id, title, content, created_at, updated_at, updated_at AS revision`
 		)
-			.bind(id, vaultId, title, content, now, now)
-			.first<Note>();
-		if (!note) return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
+			.bind(id, vaultId, title, content, now, now)];
 		if (attachmentIds.length > 0) {
-			await env.DB.batch([
+			statements.push(
 				env.DB.prepare(
 					`UPDATE note_attachments
 					 SET status = 'attached', attached_at = COALESCE(attached_at, ?), detached_at = NULL
-					 WHERE vault_id = ? AND note_id = ? AND id IN (${attachmentIds.map(() => '?').join(', ')})`
-				).bind(now, vaultId, id, ...attachmentIds),
-			]);
+					 WHERE vault_id = ? AND note_id = ? AND status = 'pending'
+					   AND id IN (${attachmentIds.map(() => '?').join(', ')})
+					   AND EXISTS (
+					     SELECT 1 FROM notes
+					     WHERE id = ? AND vault_id = ? AND created_at = ? AND updated_at = ?
+					   )`
+				).bind(now, vaultId, id, ...attachmentIds, id, vaultId, now, now)
+			);
 		}
+		const batchResult = await env.DB.batch(statements);
+		const note = (batchResult[0]?.results?.[0] as Note | undefined) ?? null;
+		if (!note) return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
 		return json({ ok: true, note }, 201);
 	}
 

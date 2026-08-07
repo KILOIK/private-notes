@@ -1,6 +1,7 @@
 import { encryptSharedPayload } from './share-crypto.js';
-import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, renderMarkdown, insertMarkdownAtSelection, replaceAttachmentReference } from './markdown.js';
-import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImage, revokeAttachmentUrls } from './attachment-crypto.js';
+import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, extractAttachmentIds, renderMarkdown, insertMarkdownAtSelection } from './markdown.js';
+import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImages, revokeAttachmentUrls } from './attachment-crypto.js';
+import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePendingToken } from './attachment-draft.js';
 import { matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
 import { decodeNoteRecord, getSafeRecordText } from './note-records.js';
 import { createDefaultPasswordFields } from './password-fields.js';
@@ -38,6 +39,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorMode: 'source' | 'preview',
  * attachmentUrls: Set<string>,
  * pendingAttachmentIds: string[],
+ * attachmentDraft: ReturnType<typeof createAttachmentDraft>,
  * pendingLoginChallenge: string | null,
  * pendingLoginPassword: string,
  * reauthRequired: boolean,
@@ -78,6 +80,7 @@ const state = {
   editorMode: 'source',
   attachmentUrls: new Set(),
   pendingAttachmentIds: [],
+  attachmentDraft: createAttachmentDraft(),
   pendingLoginChallenge: null,
   pendingLoginPassword: '',
   reauthRequired: false,
@@ -410,6 +413,30 @@ function clearSensitiveInputs() {
 
 function clearAttachmentUrls() {
   revokeAttachmentUrls(state.attachmentUrls);
+}
+
+/** @param {string} text */
+function setAttachmentStatus(text) {
+  els.attachmentStatus.textContent = text;
+  els.mobilePasteStatus.textContent = text;
+}
+
+async function discardAttachmentDraft() {
+  const images = [...state.attachmentDraft.images];
+  clearAttachmentDraft(state.attachmentDraft);
+  state.pendingAttachmentIds = [];
+  await Promise.allSettled(images.map(function (image) {
+    return image.uploadPromise || Promise.resolve();
+  }));
+  const attachmentIds = images
+    .map(function (image) { return image.attachmentId; })
+    .filter(function (id) { return typeof id === 'string'; });
+  await Promise.allSettled(attachmentIds.map(function (id) {
+    return fetch('/api/attachments/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      credentials: 'same-origin'
+    });
+  }));
 }
 
 function clearFolderState() {
@@ -1167,6 +1194,7 @@ function renderPasswordReaderFields(record) {
 
 /** @param {Note | null} note */
 function openComposer(note) {
+  clearAttachmentDraft(state.attachmentDraft);
   state.editingId = note ? note.id : null;
   state.editorMode = 'source';
   state.pendingAttachmentIds = [];
@@ -1182,19 +1210,24 @@ function openComposer(note) {
   els.editorTitle.value = note ? note.title : '';
   els.editorContent.value = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
   updateComposerRecordType(recordType);
-  els.attachmentStatus.textContent = '';
+  setAttachmentStatus('');
   els.editorModal.classList.remove('hidden');
   updateModalUi();
   els.editorTitle.focus();
 }
 
-function closeComposer() {
+/** @param {boolean} [discardDraft] */
+function closeComposer(discardDraft = true) {
+  if (discardDraft) void discardAttachmentDraft();
+  else {
+    clearAttachmentDraft(state.attachmentDraft);
+    state.pendingAttachmentIds = [];
+  }
   els.editorModal.classList.add('hidden');
   state.editingId = null;
-  state.pendingAttachmentIds = [];
   state.editorPasswordFields = [];
   state.editorFolderId = null;
-  els.attachmentStatus.textContent = '';
+  setAttachmentStatus('');
   updateModalUi();
 }
 
@@ -1256,38 +1289,72 @@ function updateEditorPreview() {
     els.editorPreview.textContent = '密码记录不支持 Markdown 预览。';
     return;
   }
-  els.editorPreview.replaceChildren(renderMarkdown(els.editorContent.value, new Map()));
+  els.editorPreview.replaceChildren(renderMarkdown(
+    els.editorContent.value,
+    new Map(),
+    state.attachmentDraft.pendingAttachments
+  ));
 }
 
-/** @param {File} file */
-async function uploadEditorImage(file) {
-  if (!state.editingId || !state.vaultKey) {
-    els.attachmentStatus.textContent = '请先保存一条笔记，再向已有笔记添加图片。';
-    return;
-  }
-  els.attachmentStatus.textContent = '正在浏览器加密并上传图片…';
-  const encrypted = await encryptAttachment(file, state.vaultKey);
+/** @param {ReturnType<typeof addPendingImage>} pending */
+async function uploadPendingEditorImage(pending) {
+  const noteId = state.editingId || state.attachmentDraft.noteId;
+  if (!noteId || !state.vaultKey) throw new Error('请先解锁内容');
+  const encrypted = await encryptAttachment(pending.blob, state.vaultKey);
+  /** @type {Record<string, string>} */
+  const headers = {
+    'content-type': 'application/octet-stream',
+    'x-note-id': noteId,
+    'x-mime-type': encrypted.mimeType,
+    'content-length': String(encrypted.byteLength)
+  };
+  if (!state.editingId) headers['x-note-draft'] = '1';
   const response = await api('/api/attachments', {
     method: 'POST',
-    headers: {
-      'content-type': 'application/octet-stream',
-      'x-note-id': state.editingId,
-      'x-mime-type': encrypted.mimeType,
-      'content-length': String(encrypted.byteLength)
-    },
+    headers: headers,
     body: encrypted.ciphertext
   });
   const id = String(response.attachment.id);
+  pending.attachmentId = id;
   state.pendingAttachmentIds.push(id);
-  els.editorContent.value = replaceAttachmentReference(els.editorContent.value, id, '图片');
-  els.attachmentStatus.textContent = '图片已加密上传，保存笔记后完成关联。';
+}
+
+/** @param {Blob} image */
+function queueEditorImage(image) {
+  if (!state.vaultKey) throw new Error('请先解锁内容');
+  if (!state.editingId && !state.attachmentDraft.noteId) state.attachmentDraft.noteId = crypto.randomUUID();
+  const pending = addPendingImage(state.attachmentDraft, image);
+  insertMarkdownAtSelection(els.editorContent, `![图片](${pending.token})`);
+  setAttachmentStatus(`正在浏览器加密并上传 ${state.attachmentDraft.images.length} 张图片…`);
+  const upload = uploadPendingEditorImage(pending);
+  pending.uploadPromise = upload;
+  upload.then(function () {
+    if (!state.attachmentDraft.images.includes(pending)) return;
+    const uploaded = state.attachmentDraft.images.filter(function (item) { return item.attachmentId; }).length;
+    setAttachmentStatus(`${uploaded} 张图片已加密上传，保存笔记后完成关联。`);
+  }).catch(function (error) {
+    pending.error = error;
+    if (!state.attachmentDraft.images.includes(pending)) return;
+    setAttachmentStatus(error instanceof Error ? error.message : '图片上传失败');
+  });
+  if (state.editorMode === 'preview') updateEditorPreview();
 }
 
 async function saveComposer() {
   const password = state.editorRecordType === 'password';
   const passwordPayload = password ? buildPasswordSavePayload(state.editorPasswordFields, state.editorFolderId) : null;
   const title = passwordPayload ? passwordPayload.title : (els.editorTitle.value.trim() || '无标题');
-  const content = passwordPayload ? passwordPayload.content : els.editorContent.value.trim();
+  await Promise.all(state.attachmentDraft.images.map(function (image) {
+    if (image.error) throw image.error;
+    return image.uploadPromise || Promise.resolve();
+  }));
+  let content = passwordPayload ? passwordPayload.content : els.editorContent.value.trim();
+  if (!password) {
+    for (const image of state.attachmentDraft.images) {
+      if (!image.attachmentId) throw new Error('图片尚未上传完成');
+      content = replacePendingToken(content, image.token, image.attachmentId);
+    }
+  }
   if (!password && !title && !content) {
     setStatus('标题和内容至少写一个');
     return;
@@ -1301,6 +1368,7 @@ async function saveComposer() {
 
   const encryptedTitle = await encryptValue(title);
   const encryptedContent = await encryptValue(content);
+  const attachmentIds = password ? [] : extractAttachmentIds(content);
 
   let data;
   if (state.editingId) {
@@ -1317,18 +1385,23 @@ async function saveComposer() {
         title: encryptedTitle,
         content: encryptedContent,
         revision: currentNote.revision,
-        attachmentIds: state.pendingAttachmentIds
+        attachmentIds: attachmentIds
       })
     });
   } else {
     data = await api('/api/notes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: encryptedTitle, content: encryptedContent, attachmentIds: state.pendingAttachmentIds })
+      body: JSON.stringify({
+        id: state.attachmentDraft.noteId || undefined,
+        title: encryptedTitle,
+        content: encryptedContent,
+        attachmentIds: attachmentIds
+      })
     });
   }
 
-  closeComposer();
+  closeComposer(false);
   await refreshNotes();
   setStatus('已保存');
 }
@@ -1829,9 +1902,10 @@ els.fabTopBtn.onclick = function () {
 };
 
 async function logout() {
+  await discardAttachmentDraft();
   await api('/api/logout', { method: 'POST' });
   clearAttachmentUrls();
-  closeComposer();
+  closeComposer(false);
   closeShareDialog(true);
   clearFolderState();
   state.notes = [];
@@ -1897,15 +1971,27 @@ els.insertLinkBtn.onclick = function () {
   els.editorContent.focus();
 };
 els.insertImageBtn.onclick = function () {
-  els.attachmentDropZone.focus();
-  setStatus('请将图片粘贴或拖入编辑区');
+  els.editorContent.focus();
+  setStatus('请直接在正文粘贴图片，或将图片拖入编辑区');
 };
-els.attachmentDropZone.addEventListener('paste', function (event) {
-  const image = extractPastedImage(event);
-  if (!image) return;
+
+/** @param {ClipboardEvent} event */
+function handleEditorPaste(event) {
+  if (state.editorRecordType !== 'note') return;
+  const images = extractPastedImages(event);
+  if (!images.length) return;
   event.preventDefault();
-  uploadEditorImage(image).catch(function (error) { els.attachmentStatus.textContent = error.message || '图片上传失败'; });
-});
+  event.stopPropagation();
+  try {
+    for (const image of images) queueEditorImage(image);
+  } catch (error) {
+    setAttachmentStatus(error instanceof Error ? error.message : '图片上传失败');
+  }
+}
+
+els.editorContent.addEventListener('paste', handleEditorPaste);
+els.editorModal.addEventListener('paste', handleEditorPaste);
+els.attachmentDropZone.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('dragover', function (event) {
   event.preventDefault();
   els.attachmentDropZone.classList.add('drag-over');
@@ -1915,11 +2001,17 @@ els.attachmentDropZone.addEventListener('drop', function (event) {
   event.preventDefault();
   els.attachmentDropZone.classList.remove('drag-over');
   const image = extractDroppedImage(event);
-  if (image) uploadEditorImage(image).catch(function (error) { els.attachmentStatus.textContent = error.message || '图片上传失败'; });
+  if (image) {
+    try {
+      queueEditorImage(image);
+    } catch (error) {
+      setAttachmentStatus(error instanceof Error ? error.message : '图片上传失败');
+    }
+  }
 });
 
-els.closeModalBtn.onclick = closeComposer;
-els.cancelBtn.onclick = closeComposer;
+els.closeModalBtn.onclick = function () { closeComposer(); };
+els.cancelBtn.onclick = function () { closeComposer(); };
 els.saveBtn.onclick = function () {
   saveComposer().catch(function (error) {
     setStatus(error.message || '保存失败');

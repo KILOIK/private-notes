@@ -75,8 +75,21 @@ function firstImageFromItems(items) {
 }
 
 /** @param {ClipboardEvent} event */
+export function extractPastedImages(event) {
+  const items = event?.clipboardData?.items;
+  if (!items) return [];
+  const images = [];
+  for (const item of Array.from(items)) {
+    if (item.kind !== 'file' || !SUPPORTED_IMAGE_TYPES.has(String(item.type || '').toLowerCase())) continue;
+    const file = item.getAsFile();
+    if (file) images.push(file);
+  }
+  return images;
+}
+
+/** Compatibility wrapper for callers that only accept one pasted image. @param {ClipboardEvent} event */
 export function extractPastedImage(event) {
-  return firstImageFromItems(event?.clipboardData?.items);
+  return extractPastedImages(event)[0] || null;
 }
 
 /** @param {DragEvent} event */

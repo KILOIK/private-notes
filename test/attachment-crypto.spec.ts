@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	decryptAttachment,
 	encryptAttachment,
+	extractPastedImage,
+	extractPastedImages,
 	revokeAttachmentUrls,
 } from '../public/attachment-crypto.js';
 
@@ -32,5 +34,39 @@ describe('browser attachment crypto', () => {
 		revokeAttachmentUrls(urls);
 		expect(revoke).toHaveBeenCalledTimes(2);
 		revoke.mockRestore();
+	});
+
+	it('extracts every supported pasted image in clipboard order', () => {
+		const jpeg = new File(['jpeg'], 'first.jpg', { type: 'image/jpeg' });
+		const png = new File(['png'], 'second.png', { type: 'image/png' });
+		const gif = new File(['gif'], 'third.gif', { type: 'image/gif' });
+		const text = new File(['plain'], 'skip.txt', { type: 'text/plain' });
+		const webp = new File(['webp'], 'fourth.webp', { type: 'image/webp' });
+		const event = {
+			clipboardData: {
+				items: [
+					{ kind: 'string', type: 'text/plain', getAsFile: () => null },
+					{ kind: 'file', type: jpeg.type, getAsFile: () => jpeg },
+					{ kind: 'file', type: png.type, getAsFile: () => png },
+					{ kind: 'file', type: gif.type, getAsFile: () => gif },
+					{ kind: 'file', type: text.type, getAsFile: () => text },
+					{ kind: 'file', type: webp.type, getAsFile: () => webp },
+				],
+			},
+		} as any;
+
+		expect(extractPastedImages(event)).toEqual([jpeg, png, gif, webp]);
+		expect(extractPastedImage(event)).toBe(jpeg);
+	});
+
+	it('leaves text-only paste events without an image result', () => {
+		const event = {
+			clipboardData: {
+				items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }],
+			},
+		} as any;
+
+		expect(extractPastedImages(event)).toEqual([]);
+		expect(extractPastedImage(event)).toBeNull();
 	});
 });

@@ -118,8 +118,8 @@ function isSafeLink(url) {
   }
 }
 
-/** @param {string} text @param {Map<string, string>} attachments */
-function renderInline(text, attachments) {
+/** @param {string} text @param {Map<string, string>} attachments @param {Map<string, string>} pendingAttachments */
+function renderInline(text, attachments, pendingAttachments) {
   const fragment = document.createDocumentFragment();
   const tokenPattern = /(!\[([^\]]*)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)|\[([^\]]+)\]\(([^)\s]+)\)|(`+)([^`]+)\3|(\*\*|__)(.+?)\10|(\*|_)(.+?)\11)/g;
   let cursor = 0;
@@ -131,6 +131,17 @@ function renderInline(text, attachments) {
       if (url.toLowerCase().startsWith('attachment://')) {
         const id = url.slice('attachment://'.length).toLowerCase();
         const resolved = attachments.get(id);
+        if (resolved) {
+          const image = document.createElement('img');
+          image.src = resolved;
+          image.alt = match[2] || '图片';
+          image.loading = 'lazy';
+          fragment.append(image);
+        } else {
+          fragment.append(document.createTextNode(match[2] || '[图片]'));
+        }
+      } else if (url.toLowerCase().startsWith('pending://')) {
+        const resolved = pendingAttachments.get(url);
         if (resolved) {
           const image = document.createElement('img');
           image.src = resolved;
@@ -173,8 +184,8 @@ function renderInline(text, attachments) {
   return fragment;
 }
 
-/** @param {string} source @param {Map<string, string>} [attachments] */
-export function renderMarkdown(source, attachments = new Map()) {
+/** @param {string} source @param {Map<string, string>} [attachments] @param {Map<string, string>} [pendingAttachments] */
+export function renderMarkdown(source, attachments = new Map(), pendingAttachments = new Map()) {
   if (typeof document === 'undefined') throw new Error('Markdown rendering requires a browser document');
   const root = document.createDocumentFragment();
   const lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
@@ -202,7 +213,7 @@ export function renderMarkdown(source, attachments = new Map()) {
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) {
       const element = document.createElement(`h${heading[1].length}`);
-      element.append(renderInline(heading[2], attachments));
+      element.append(renderInline(heading[2], attachments, pendingAttachments));
       root.append(element);
       index += 1;
       continue;
@@ -211,7 +222,7 @@ export function renderMarkdown(source, attachments = new Map()) {
       const quoteLines = [];
       while (index < lines.length && /^\s*>/.test(lines[index])) quoteLines.push(lines[index++].replace(/^\s*>\s?/, ''));
       const quote = document.createElement('blockquote');
-      quote.append(renderInline(quoteLines.join('\n'), attachments));
+      quote.append(renderInline(quoteLines.join('\n'), attachments, pendingAttachments));
       root.append(quote);
       continue;
     }
@@ -223,7 +234,7 @@ export function renderMarkdown(source, attachments = new Map()) {
         const itemMatch = (ordered ? /^\s*\d+[.)]\s+(.+)$/ : /^\s*[-+*]\s+(.+)$/).exec(lines[index]);
         if (!itemMatch) break;
         const item = document.createElement('li');
-        item.append(renderInline(itemMatch[1], attachments));
+        item.append(renderInline(itemMatch[1], attachments, pendingAttachments));
         list.append(item);
         index += 1;
       }
@@ -240,7 +251,7 @@ export function renderMarkdown(source, attachments = new Map()) {
     const paragraph = document.createElement('p');
     paragraphLines.forEach((part, partIndex) => {
       if (partIndex) paragraph.append(document.createElement('br'));
-      paragraph.append(renderInline(part, attachments));
+      paragraph.append(renderInline(part, attachments, pendingAttachments));
     });
     root.append(paragraph);
   }
