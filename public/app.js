@@ -203,7 +203,11 @@ const els = {
   readerEmptyState: getElement('readerEmptyState'),
   readerDetail: getElement('readerDetail'),
   readerBackBtn: getButton('readerBackBtn'),
+  readerPath: getElement('readerPath'),
   readerMeta: getElement('readerMeta'),
+  readerCopyBtn: getButton('readerCopyBtn'),
+  readerShareBtn: getButton('readerShareBtn'),
+  readerEditBtn: getButton('readerEditBtn'),
   readerMoreBtn: getButton('readerMoreBtn'),
   readerTitle: getElement('readerTitle'),
   readerContent: getElement('readerContent'),
@@ -1040,40 +1044,6 @@ function formatDate(ts) {
 }
 
 /** @param {number} ts */
-function formatGroupLabel(ts) {
-  const d = new Date(ts);
-  const now = new Date();
-  /** @param {Date} value */
-  const startOf = function (value) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  };
-  const diffDays = Math.floor((startOf(now) - startOf(d)) / 86400000);
-  if (diffDays === 0) return '今天';
-  if (diffDays === 1) return '昨天';
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(d);
-}
-
-/** @param {string} text */
-function wordCount(text) {
-  return (text || '').replace(/\s+/g, '').length;
-}
-
-/** @param {Note} note */
-function getDisplayContent(note) {
-  const content = note.content || '';
-  const lines = content.split('\n');
-  const expanded = state.expandedIds.has(note.id);
-  return {
-    text: expanded ? content : lines.slice(0, 30).join('\n'),
-    expanded: expanded,
-    canExpand: lines.length > 30
-  };
-}
-
 /**
  * @param {string} url
  * @param {RequestInit} [options]
@@ -1175,158 +1145,71 @@ function renderList() {
     els.noteList.appendChild(warning);
   }
 
-  /** @type {Map<string, Note[]>} */
-  const groups = new Map();
   state.notes.forEach(function (note) {
-    const key = formatGroupLabel(note.updated_at);
-    const group = groups.get(key);
-    if (group) {
-      group.push(note);
-    } else {
-      groups.set(key, [note]);
-    }
-  });
+    const record = note.record || decodeNoteRecord(note.content);
+    const viewModel = buildNoteCardViewModel({
+      title: note.title,
+      record: record,
+      folder: note.folderName,
+      createdAt: note.created_at,
+      updatedAt: note.updated_at
+    });
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'note-list-row' + (note.decryptFailed ? ' decrypt-failed' : '');
+    row.dataset.noteId = note.id;
+    row.disabled = note.decryptFailed;
 
-  groups.forEach(function (notes, groupLabel) {
-    const group = document.createElement('section');
-    group.className = 'group-block';
-
-    const groupTitle = document.createElement('div');
-    groupTitle.className = 'group-title';
-    groupTitle.textContent = groupLabel;
-    group.appendChild(groupTitle);
-
-    notes.forEach(function (note) {
-      const card = document.createElement('article');
-      card.className = 'note-card' + (note.decryptFailed ? ' decrypt-failed' : '');
-
-      const viewModel = buildNoteCardViewModel({
-        title: note.title,
-        record: note.record || decodeNoteRecord(note.content),
-        folder: note.folderName,
-        createdAt: note.created_at,
-        updatedAt: note.updated_at
-      });
-
-      const labels = document.createElement('div');
-      labels.className = 'note-card-labels';
-      const type = document.createElement('span');
-      type.className = 'note-card-label';
-      type.textContent = viewModel.type === 'password' ? '密码' : '笔记';
-      const folder = document.createElement('span');
-      folder.className = 'note-card-label';
-      folder.textContent = viewModel.folder;
-      labels.append(type, folder);
-
-      const meta = document.createElement('div');
-      meta.className = 'note-card-meta';
-      const created = document.createElement('span');
-      created.textContent = '创建 ' + formatDate(viewModel.createdAt);
-      const updated = document.createElement('span');
-      updated.textContent = '更新 ' + formatDate(viewModel.updatedAt);
-      meta.append(created, updated);
-
-      const title = document.createElement('div');
-      title.className = 'note-card-title';
-      buildHighlightedTextSegments(viewModel.title, els.searchInput.value).forEach(function (segment) {
-        if (!segment.highlighted) {
-          title.append(document.createTextNode(segment.text));
-          return;
-        }
-        const mark = document.createElement('mark');
-        mark.className = 'search-highlight';
-        mark.textContent = segment.text;
-        title.append(mark);
-      });
-
-      const actions = document.createElement('div');
-      actions.className = 'note-actions';
-
-      const copyBtn = document.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.className = 'btn';
-      copyBtn.textContent = '复制全文';
-      const copyText = getSafeRecordText(note.record, note.content);
-      copyBtn.disabled = note.decryptFailed || copyText === null;
-      copyBtn.onclick = async function () {
-        try {
-          if (copyText === null) throw new Error('password copy disabled');
-          await navigator.clipboard.writeText(copyText);
-          setStatus('已复制：' + (note.title || '无标题'));
-        } catch (error) {
-          setStatus('复制失败，请手动选择文本复制');
-        }
-      };
-
-      const shareBtn = document.createElement('button');
-      shareBtn.type = 'button';
-      shareBtn.className = 'btn secondary';
-      shareBtn.textContent = '分享';
-      shareBtn.disabled = note.decryptFailed;
-      shareBtn.onclick = function () {
-        openShareDialog(note);
-      };
-
-      const editBtn = document.createElement('button');
-      editBtn.type = 'button';
-      editBtn.className = 'btn secondary';
-      editBtn.textContent = '编辑';
-      editBtn.disabled = note.decryptFailed;
-      editBtn.onclick = function () {
-        openComposer(note);
-      };
-
-      const moreWrap = document.createElement('div');
-      moreWrap.className = 'more-wrap';
-      const moreBtn = document.createElement('button');
-      moreBtn.type = 'button';
-      moreBtn.className = 'btn secondary more-trigger';
-      moreBtn.textContent = '更多';
-      moreBtn.setAttribute('aria-haspopup', 'menu');
-      const moreMenu = document.createElement('div');
-      moreMenu.className = 'more-menu hidden';
-      moreMenu.setAttribute('role', 'menu');
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn danger';
-      deleteBtn.textContent = '删除笔记';
-      deleteBtn.disabled = note.decryptFailed;
-      moreBtn.onclick = function (event) {
-        event.stopPropagation();
-        moreMenu.classList.toggle('hidden');
-      };
-      deleteBtn.onclick = function (event) {
-        event.stopPropagation();
-        moreMenu.classList.add('hidden');
-        deleteNote(note.id).catch(function (error) {
-          setStatus(error.message || '删除失败');
-        });
-      };
-      moreMenu.appendChild(deleteBtn);
-      moreWrap.appendChild(moreBtn);
-      moreWrap.appendChild(moreMenu);
-
-      const snippet = document.createElement('div');
-      snippet.className = 'note-card-snippet' + (viewModel.snippet ? '' : ' is-empty');
-      snippet.textContent = viewModel.snippet || '这条笔记还没有内容。';
-
-      card.appendChild(labels);
-      card.appendChild(meta);
-      card.appendChild(actions);
-      actions.appendChild(copyBtn);
-      if (copyText !== null) actions.appendChild(shareBtn);
-      actions.appendChild(editBtn);
-      actions.appendChild(moreWrap);
-      card.appendChild(title);
-      card.appendChild(snippet);
-      card.addEventListener('click', function (event) {
-        if (event.target instanceof HTMLElement && event.target.closest('button')) return;
-        openReader(note.id).catch(function (error) { setStatus(error.message || '打开笔记失败'); });
-      });
-      group.appendChild(card);
+    const title = document.createElement('div');
+    title.className = 'note-row-title';
+    buildHighlightedTextSegments(viewModel.title, els.searchInput.value).forEach(function (segment) {
+      if (!segment.highlighted) {
+        title.append(document.createTextNode(segment.text));
+        return;
+      }
+      const mark = document.createElement('mark');
+      mark.className = 'search-highlight';
+      mark.textContent = segment.text;
+      title.append(mark);
     });
 
-    els.noteList.appendChild(group);
+    const snippet = document.createElement('div');
+    snippet.className = 'note-row-snippet' + (viewModel.snippet ? '' : ' is-empty');
+    snippet.textContent = viewModel.snippet || '这条笔记还没有内容。';
+
+    const labels = document.createElement('div');
+    labels.className = 'note-row-labels';
+    const type = document.createElement('span');
+    type.className = 'note-row-label';
+    type.textContent = viewModel.type === 'password' ? '密码' : '笔记';
+    const folder = document.createElement('span');
+    folder.className = 'note-row-label';
+    folder.textContent = viewModel.folder;
+    labels.append(type, folder);
+
+    const dates = document.createElement('div');
+    dates.className = 'note-row-dates';
+    const updated = document.createElement('span');
+    updated.textContent = '更新 ' + formatDate(viewModel.updatedAt);
+    const created = document.createElement('span');
+    created.textContent = '创建 ' + formatDate(viewModel.createdAt);
+    dates.append(updated, created);
+
+    row.append(title, snippet, labels, dates);
+    row.onclick = function () {
+      openReader(note.id).catch(function (error) { setStatus(error.message || '打开笔记失败'); });
+    };
+    els.noteList.appendChild(row);
+  });
+  syncSelectedNoteRow();
+}
+
+function syncSelectedNoteRow() {
+  els.noteList.querySelectorAll('[data-note-id]').forEach(function (element) {
+    const selected = element instanceof HTMLElement && element.dataset.noteId === state.readerNoteId;
+    element.classList.toggle('is-selected', selected);
+    if (selected) element.setAttribute('aria-current', 'true');
+    else element.removeAttribute('aria-current');
   });
 }
 
@@ -1452,8 +1335,15 @@ async function openReader(noteId) {
   if (state.workspaceMode === 'mobile') state.listScrollTop = els.noteListScroll.scrollTop;
   state.readerNoteId = noteId;
   syncWorkspacePresentation();
+  syncSelectedNoteRow();
+  const record = note.record || decodeNoteRecord(note.content);
+  const actions = getReaderActionModel(record);
   els.readerTitle.textContent = note.title || '无标题';
+  els.readerPath.textContent = (record.type === 'password' ? '密码' : '笔记') + ' / ' + (note.folderName || '未分类');
   els.readerMeta.textContent = '创建 ' + formatDate(note.created_at) + ' · 更新 ' + formatDate(note.updated_at);
+  els.readerCopyBtn.classList.toggle('hidden', !actions.copyVisible);
+  els.readerShareBtn.classList.toggle('hidden', !actions.shareVisible);
+  els.readerEditBtn.classList.toggle('hidden', !actions.editVisible);
   els.readerContent.replaceChildren();
   els.readerContent.classList.remove('hidden');
   els.passwordFields.replaceChildren();
@@ -1461,11 +1351,11 @@ async function openReader(noteId) {
   els.readerEmptyState.classList.add('hidden');
   els.readerDetail.classList.remove('hidden');
   els.readerView.scrollTop = 0;
-  const plan = buildReaderRenderPlan(note.record || decodeNoteRecord(note.content));
+  const plan = buildReaderRenderPlan(record);
   if (!plan.renderMarkdown) {
     els.readerContent.classList.add('hidden');
     els.passwordFields.classList.remove('hidden');
-    renderPasswordReaderFields(note.record || decodeNoteRecord(note.content));
+    renderPasswordReaderFields(record);
     return;
   }
 
@@ -1504,16 +1394,34 @@ function closeReader() {
   els.readerEmptyState.classList.remove('hidden');
   els.readerDetail.classList.add('hidden');
   els.readerMoreMenu.classList.add('hidden');
+  els.readerMoreBtn.setAttribute('aria-expanded', 'false');
   els.readerTitle.textContent = '';
+  els.readerPath.textContent = '';
   els.readerMeta.textContent = '';
   els.readerContent.replaceChildren();
   els.passwordFields.replaceChildren();
   const restore = state.workspaceMode === 'mobile' ? state.listScrollTop : null;
   state.readerNoteId = null;
   syncWorkspacePresentation();
+  syncSelectedNoteRow();
   if (restore !== null) window.requestAnimationFrame(function () {
     els.noteListScroll.scrollTop = restore;
   });
+}
+
+function getCurrentReaderNote() {
+  return state.readerNoteId
+    ? state.allNotes.find(function (note) { return note.id === state.readerNoteId; }) || null
+    : null;
+}
+
+async function copyCurrentReaderNote() {
+  const note = getCurrentReaderNote();
+  if (!note || note.decryptFailed) throw new Error('找不到可复制的笔记');
+  const text = getSafeRecordText(note.record, note.content);
+  if (text === null) throw new Error('密码记录请逐字段复制');
+  await navigator.clipboard.writeText(text);
+  setStatus('已复制：' + (note.title || '无标题'));
 }
 
 function updateEditorPreview() {
@@ -2149,12 +2057,39 @@ els.loginLogoutBtn.onclick = function () {
 };
 
 els.readerBackBtn.onclick = closeReader;
+els.readerCopyBtn.onclick = function () {
+  copyCurrentReaderNote().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '复制失败，请检查剪贴板权限');
+  });
+};
+els.readerShareBtn.onclick = function () {
+  const note = getCurrentReaderNote();
+  if (!note || note.decryptFailed) {
+    setStatus('找不到可分享的笔记');
+    return;
+  }
+  if (getSafeRecordText(note.record, note.content) === null) {
+    setStatus('密码记录不支持分享');
+    return;
+  }
+  openShareDialog(note);
+};
+els.readerEditBtn.onclick = function () {
+  const note = getCurrentReaderNote();
+  if (!note || note.decryptFailed) {
+    setStatus('找不到可编辑的笔记');
+    return;
+  }
+  openComposer(note);
+};
 els.readerMoreBtn.onclick = function () {
   els.readerMoreMenu.classList.toggle('hidden');
+  els.readerMoreBtn.setAttribute('aria-expanded', String(!els.readerMoreMenu.classList.contains('hidden')));
 };
 els.readerDeleteBtn.onclick = function () {
-  if (!state.readerNoteId) return;
-  deleteNote(state.readerNoteId).then(closeReader).catch(function (error) { setStatus(error.message || '删除失败'); });
+  const note = getCurrentReaderNote();
+  if (!note || note.decryptFailed) return;
+  deleteNote(note.id).then(closeReader).catch(function (error) { setStatus(error.message || '删除失败'); });
 };
 els.editorFolder.onchange = function () {
   state.editorFolderId = els.editorFolder.value || null;

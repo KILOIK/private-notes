@@ -132,6 +132,20 @@ describe('note record codecs', () => {
 		});
 	});
 
+	it('keeps password secrets out of list summaries', () => {
+		const record = decodeNoteRecord(JSON.stringify({ v: 1, type: 'password', folderId: null, fields: [
+			{ id: 'name', type: 'text', label: '名称', value: 'Account' },
+			{ id: 'username', type: 'text', label: '用户名', value: 'private-user' },
+			{ id: 'password', type: 'secret', label: '密码', value: 'private-secret' },
+			{ id: 'url', type: 'text', label: '网址', value: '' },
+			{ id: 'notes', type: 'multiline', label: '备注', value: '' },
+		] }));
+		const model = buildNoteCardViewModel({ title: 'Account', record, folder: '工作', createdAt: 1, updatedAt: 2 });
+		expect(model.snippet).toBe('密码记录');
+		expect(JSON.stringify(model)).not.toContain('private-secret');
+		expect(JSON.stringify(model)).not.toContain('private-user');
+	});
+
 	it('returns only Markdown for safe note sharing and copying', () => {
 		const note = decodeNoteRecord(JSON.stringify({ v: 1, type: 'note', folderId: null, markdown: '# Share me' }));
 		const password = decodeNoteRecord(JSON.stringify({ v: 1, type: 'password', folderId: null, fields: [

@@ -226,6 +226,11 @@ describe('private-notes worker', () => {
 			'feedView', 'noteListScroll', 'readerEmptyState', 'readerDetail', 'readerCopyBtn',
 			'readerShareBtn', 'readerEditBtn', 'readerMoreBtn'];
 		for (const id of requiredIds) expect(appHtml).toContain(`id="${id}"`);
+		expect(appHtml).not.toContain('复制全文');
+		expect(appHtml).toContain('id="readerCopyBtn"');
+		expect(appHtml).toContain('id="readerShareBtn"');
+		expect(appHtml).toContain('id="readerEditBtn"');
+		expect(appHtml.indexOf('id="readerDeleteBtn"')).toBeGreaterThan(appHtml.indexOf('id="readerMoreMenu"'));
 		expect(appHtml).toContain('<link rel="stylesheet" href="/workspace.css" />');
 		expect(appHtml).not.toContain('class="card workspace-sidebar"');
 		expect(appHtml).not.toContain('class="card feed"');
