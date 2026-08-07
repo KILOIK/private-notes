@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation } from '../public/workspace-view.js';
+import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from '../public/workspace-view.js';
 
 describe('workspace presentation', () => {
 	it('uses exact breakpoints', () => {
@@ -22,6 +22,13 @@ describe('workspace presentation', () => {
 		const list = getWorkspacePresentation(430, null, reader.navigationOpen);
 		expect(reader.activeView).toBe('reader');
 		expect(list).toMatchObject({ activeView: 'list', showList: true, showReader: false, navigationOpen: false });
+	});
+
+	it('uses the visible pane as the workspace scroll target', () => {
+		expect(getWorkspaceScrollTarget('wide', null)).toBe('list');
+		expect(getWorkspaceScrollTarget('wide', 'n1')).toBe('reader');
+		expect(getWorkspaceScrollTarget('compact', 'n1')).toBe('reader');
+		expect(getWorkspaceScrollTarget('mobile', null)).toBe('list');
 	});
 
 	it('keeps password-wide operations unavailable', () => {

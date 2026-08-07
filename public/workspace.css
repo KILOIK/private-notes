@@ -1,5 +1,6 @@
 :root {
   --topbar-height: 64px;
+  --reader-head-height: 64px;
   --workspace-divider: #e5e7eb;
   --workspace-accent: #15803d;
   --workspace-accent-muted: #eff6ff;
@@ -35,6 +36,7 @@
 .workspace-layout {
   display: grid;
   grid-template-columns: 216px 360px minmax(0, 1fr);
+  align-items: stretch;
   overflow: hidden;
 }
 
@@ -325,6 +327,7 @@
   top: 0;
   z-index: 5;
   min-height: 64px;
+  margin: 0;
   justify-content: space-between;
   gap: 14px;
   padding: 10px 24px;
@@ -428,9 +431,14 @@
 
 .more-menu {
   position: fixed;
-  top: calc(var(--topbar-height) + 8px);
+  top: calc(var(--topbar-height) + var(--reader-head-height) + 8px);
   right: 16px;
+  z-index: 6;
+  padding: 8px;
+  border: 1px solid var(--workspace-divider);
   border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
 .topbar {
@@ -595,6 +603,7 @@ a:focus-visible {
 @media (max-width: 767px) {
   :root {
     --topbar-height: 56px;
+    --reader-head-height: 56px;
   }
 
   #appView:not(.app-dimmed) {
@@ -724,7 +733,6 @@ a:focus-visible {
   }
 
   .more-menu {
-    top: 58px;
     right: 8px;
   }
 

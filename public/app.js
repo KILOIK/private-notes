@@ -9,7 +9,7 @@ import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEdit
 import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { setComposerSaving } from './composer-saving.js';
-import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation } from './workspace-view.js';
+import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -63,6 +63,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * navigationOpen: boolean
  * navigationReturnFocus: HTMLElement | null
  * listScrollTop: number
+ * hasListScrollSnapshot: boolean
  * settingsReturnFocus: HTMLElement | null
  * folderReturnFocus: HTMLElement | null
  * editingFolderId: string | null
@@ -111,6 +112,7 @@ const state = {
   navigationOpen: false,
   navigationReturnFocus: null,
   listScrollTop: 0,
+  hasListScrollSnapshot: false,
   settingsReturnFocus: null,
   folderReturnFocus: null,
   editingFolderId: null
@@ -274,8 +276,14 @@ function updateSearchUi() {
   els.clearSearchBtn.classList.toggle('show', hasText);
 }
 
+function getActiveScrollElement() {
+  return getWorkspaceScrollTarget(state.workspaceMode, state.readerNoteId) === 'reader'
+    ? els.readerView
+    : els.noteListScroll;
+}
+
 function updateScrollUi() {
-  const shouldShow = window.scrollY > 320;
+  const shouldShow = getActiveScrollElement().scrollTop > 320;
   els.fabTopBtn.classList.toggle('show', shouldShow);
 }
 
@@ -297,6 +305,7 @@ function syncWorkspacePresentation() {
   els.workspaceLayout.dataset.activeView = view.activeView;
   els.workspaceNavigation.classList.toggle('is-open', view.showNavigation);
   els.workspaceNavigation.setAttribute('aria-hidden', String(!view.showNavigation));
+  els.workspaceNavigation.inert = !view.showNavigation;
   els.navigationBtn.setAttribute('aria-expanded', String(view.navigationOpen));
   els.navigationBackdrop.classList.toggle('hidden', !view.navigationModal);
   els.feedView.classList.toggle('is-hidden', !view.showList);
@@ -1038,7 +1047,10 @@ els.categoryNav.addEventListener('click', function (event) {
   if (category !== 'all' && category !== 'note' && category !== 'password') return;
   state.activeCategory = category;
   applySearch();
-  if (state.workspaceMode !== 'wide') closeNavigation(false);
+  if (state.workspaceMode !== 'wide') {
+    closeNavigation(false);
+    els.navigationBtn.focus();
+  }
   els.noteListScroll.scrollTop = 0;
 });
 
@@ -1048,7 +1060,10 @@ els.folderNav.addEventListener('click', function (event) {
   const folderId = target.dataset.folderId || '';
   state.activeFolderId = folderId === '' ? undefined : folderId === '__uncategorized__' ? null : folderId;
   applySearch();
-  if (state.workspaceMode !== 'wide') closeNavigation(false);
+  if (state.workspaceMode !== 'wide') {
+    closeNavigation(false);
+    els.navigationBtn.focus();
+  }
   els.noteListScroll.scrollTop = 0;
 });
 els.manageFoldersBtn.onclick = openFolderDialog;
@@ -1367,7 +1382,8 @@ async function openReader(noteId) {
   const vaultKey = state.vaultKey;
   const operationId = state.readerOperation.begin();
   clearAttachmentUrls();
-  if (state.workspaceMode === 'mobile') state.listScrollTop = els.noteListScroll.scrollTop;
+  state.listScrollTop = els.noteListScroll.scrollTop;
+  state.hasListScrollSnapshot = true;
   state.readerNoteId = noteId;
   syncWorkspacePresentation();
   syncSelectedNoteRow();
@@ -1386,6 +1402,7 @@ async function openReader(noteId) {
   els.readerEmptyState.classList.add('hidden');
   els.readerDetail.classList.remove('hidden');
   els.readerView.scrollTop = 0;
+  updateScrollUi();
   const plan = buildReaderRenderPlan(record);
   if (!plan.renderMarkdown) {
     els.readerContent.classList.add('hidden');
@@ -1435,12 +1452,14 @@ function closeReader() {
   els.readerMeta.textContent = '';
   els.readerContent.replaceChildren();
   els.passwordFields.replaceChildren();
-  const restore = state.workspaceMode === 'mobile' ? state.listScrollTop : null;
+  const restore = state.hasListScrollSnapshot ? state.listScrollTop : null;
+  state.hasListScrollSnapshot = false;
   state.readerNoteId = null;
   syncWorkspacePresentation();
   syncSelectedNoteRow();
   if (restore !== null) window.requestAnimationFrame(function () {
     els.noteListScroll.scrollTop = restore;
+    updateScrollUi();
   });
 }
 
@@ -2076,7 +2095,7 @@ els.unlockBtn.onclick = function () {
 };
 
 els.fabTopBtn.onclick = function () {
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  getActiveScrollElement().scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 async function logout() {
@@ -2269,7 +2288,8 @@ document.addEventListener('keydown', function (event) {
   }
 });
 
-window.addEventListener('scroll', updateScrollUi, { passive: true });
+els.noteListScroll.addEventListener('scroll', updateScrollUi, { passive: true });
+els.readerView.addEventListener('scroll', updateScrollUi, { passive: true });
 window.addEventListener('resize', handleWorkspaceResize, { passive: true });
 
 ['pointerdown', 'keydown', 'touchstart'].forEach(function (eventName) {

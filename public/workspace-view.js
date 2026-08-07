@@ -24,6 +24,11 @@ export function getWorkspacePresentation(width, readerNoteId, navigationOpen) {
   });
 }
 
+/** @param {'wide'|'compact'|'mobile'} mode @param {string|null} readerNoteId */
+export function getWorkspaceScrollTarget(mode, readerNoteId) {
+  return mode === 'mobile' ? (readerNoteId ? 'reader' : 'list') : readerNoteId ? 'reader' : 'list';
+}
+
 /** @param {{type?: string}|null|undefined} record */
 export function getReaderActionModel(record) {
   const password = record?.type === 'password';
