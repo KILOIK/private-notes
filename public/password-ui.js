@@ -1,19 +1,16 @@
-import { addCustomField, copyFieldValue, removeCustomField, toggleSecretVisibility } from './password-fields.js';
+import { addCustomField, copyFieldValue, removePasswordField, toggleSecretVisibility } from './password-fields.js';
 import { encodePasswordRecord } from './note-records.js';
 import { buildPasswordDisplayModel } from './workspace-model.js';
-
-const FIXED_FIELD_IDS = new Set(['name', 'username', 'password', 'url', 'notes']);
 
 /**
  * @typedef {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} PasswordField
  */
 
-/** @param {PasswordField[]} fields @param {string | null} folderId */
-export function buildPasswordSavePayload(fields, folderId) {
-  const name = fields.find(function (field) { return field.id === 'name'; });
+/** @param {string} title @param {PasswordField[]} fields @param {string | null} folderId */
+export function buildPasswordSavePayload(title, fields, folderId) {
   return {
-    title: String(name?.value || ''),
-    content: encodePasswordRecord({ type: 'password', folderId: folderId, fields: fields })
+    title: String(title || '').trim() || '无标题',
+    content: encodePasswordRecord({ type: 'password', folderId: folderId, title: String(title || '').trim() || '无标题', fields: fields })
   };
 }
 
@@ -23,13 +20,8 @@ export function buildPasswordSavePayload(fields, folderId) {
  * @param {HTMLElement} passwordFields
  */
 export function focusComposerPrimaryField(recordType, titleInput, passwordFields) {
-  if (recordType === 'password') {
-    const passwordName = /** @type {HTMLElement | null} */ (passwordFields.querySelector('.password-editor-value'));
-    if (passwordName) {
-      passwordName.focus();
-      return;
-    }
-  }
+  void recordType;
+  void passwordFields;
   titleInput.focus();
 }
 
@@ -48,23 +40,15 @@ export function renderPasswordEditor(container, fields, onFieldsChange) {
   fields.forEach(function (field) {
     const wrapper = document.createElement('div');
     wrapper.className = 'password-field password-editor-field';
-    const label = document.createElement('label');
-    label.className = 'password-field-label';
-    label.textContent = field.label;
-    wrapper.append(label);
-
-    if (!FIXED_FIELD_IDS.has(field.id)) {
-      const labelInput = document.createElement('input');
-      labelInput.type = 'text';
-      labelInput.className = 'input password-custom-label';
-      labelInput.value = field.label;
-      labelInput.setAttribute('aria-label', '字段名称');
-      labelInput.addEventListener('input', function () {
-        field.label = labelInput.value;
-        label.textContent = field.label || '自定义字段';
-      });
-      wrapper.append(labelInput);
-    }
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.className = 'input password-custom-label';
+    labelInput.value = field.label;
+    labelInput.setAttribute('aria-label', '字段名称');
+    labelInput.addEventListener('input', function () {
+      field.label = labelInput.value;
+    });
+    wrapper.append(labelInput);
 
     let input;
     if (field.type === 'multiline') {
@@ -95,16 +79,14 @@ export function renderPasswordEditor(container, fields, onFieldsChange) {
       wrapper.append(visibility);
     }
 
-    if (!FIXED_FIELD_IDS.has(field.id)) {
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'btn secondary password-field-action';
-      remove.textContent = '删除字段';
-      remove.onclick = function () {
-        onFieldsChange(removeCustomField(fields, field.id));
-      };
-      wrapper.append(remove);
-    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn secondary password-field-action';
+    remove.textContent = '删除字段';
+    remove.onclick = function () {
+      onFieldsChange(removePasswordField(fields, field.id));
+    };
+    wrapper.append(remove);
     container.append(wrapper);
   });
 

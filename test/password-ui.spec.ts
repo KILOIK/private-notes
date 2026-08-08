@@ -64,7 +64,7 @@ function descendants(root: TestElement): TestElement[] {
 }
 
 describe('password editor and reader behavior', () => {
-	it('focuses the visible password name field instead of the hidden note title', () => {
+	it('focuses the independent title for both note and password records', () => {
 		const title = new TestElement();
 		const passwordFields = new TestElement();
 		const name = new TestElement();
@@ -72,14 +72,15 @@ describe('password editor and reader behavior', () => {
 		passwordFields.append(name);
 
 		focusComposerPrimaryField('password', title as never, passwordFields as never);
-		expect(name.focused).toBe(true);
-		expect(title.focused).toBe(false);
+		expect(name.focused).toBe(false);
+		expect(title.focused).toBe(true);
 
+		title.focused = false;
 		focusComposerPrimaryField('note', title as never, passwordFields as never);
 		expect(title.focused).toBe(true);
 	});
 
-	it('creates fixed password fields, adds and removes a custom field through editor controls', () => {
+	it('adds fields and removes default fields through editor controls', () => {
 		const restore = installDocument();
 		try {
 			const container = new TestElement();
@@ -89,37 +90,36 @@ describe('password editor and reader behavior', () => {
 			renderPasswordEditor(container, fields, update);
 			expect(descendants(container).filter((element) => element.className.includes('password-editor-value'))).toHaveLength(5);
 			expect(descendants(container).find((element) => element.value === '' && element.type === 'password')).toBeTruthy();
+			const defaultRemoveButtons = descendants(container).filter((element) => element.textContent === '删除字段');
+			expect(defaultRemoveButtons).toHaveLength(5);
+			defaultRemoveButtons[0].onclick?.();
+			expect(fields.map((field) => field.id)).not.toContain('name');
+
+			renderPasswordEditor(container, fields, update);
 
 			const addSecret = descendants(container).find((element) => element.textContent === '添加隐藏字段');
 			expect(addSecret?.onclick).toBeTypeOf('function');
 			addSecret?.onclick?.();
-			expect(update).toHaveBeenCalledOnce();
-			expect(fields).toHaveLength(6);
-			expect(fields.at(-1)?.type).toBe('secret');
-
-			renderPasswordEditor(container, fields, update);
-			const remove = descendants(container).find((element) => element.textContent === '删除字段');
-			expect(remove?.onclick).toBeTypeOf('function');
-			remove?.onclick?.();
+			expect(update).toHaveBeenCalledTimes(2);
 			expect(fields).toHaveLength(5);
+			expect(fields.at(-1)?.type).toBe('secret');
 		} finally {
 			restore();
 		}
 	});
 
-	it('serializes password fields with the name as title and preserves folder id', () => {
+	it('serializes password fields with an independent title and preserves folder id', () => {
 		const fields = createDefaultPasswordFields();
 		fields[0].value = 'Example account';
 		fields[2].value = 'not-logged-secret';
 
-		const payload = buildPasswordSavePayload(fields, 'folder-1');
-		expect(payload.title).toBe('Example account');
+		const payload = buildPasswordSavePayload('Identity record', fields.slice(1), 'folder-1');
+		expect(payload.title).toBe('Identity record');
 		expect(decodeNoteRecord(payload.content)).toMatchObject({
 			type: 'password',
 			folderId: 'folder-1',
-			fields: expect.arrayContaining([
-				expect.objectContaining({ id: 'name', value: 'Example account' }),
-			]),
+			title: 'Identity record',
+			fields: expect.not.arrayContaining([expect.objectContaining({ id: 'name' })]),
 		});
 	});
 

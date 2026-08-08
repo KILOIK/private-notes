@@ -216,6 +216,8 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('settingsLogoutBtn');
 		expect(appHtml).toContain('passwordFields');
 		expect(appHtml).toContain('passwordEditorFields');
+		expect(appHtml).toContain('id="editorTitle"');
+		expect(appHtml).toContain('placeholder="记录标题"');
 		expect(appHtml).toContain('folderDialog');
 		expect(appHtml).toContain('attachmentStatus');
 		expect(appHtml).toContain('per-field-copy');

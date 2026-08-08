@@ -1409,7 +1409,7 @@ async function refreshTrash() {
 function updateComposerRecordType(recordType) {
   const password = recordType === 'password';
   state.editorRecordType = recordType;
-  els.editorTitle.classList.toggle('hidden', password);
+  els.editorTitle.classList.remove('hidden');
   els.passwordEditorFields.classList.toggle('hidden', !password);
   els.editorContent.classList.toggle('hidden', password || state.editorMode === 'preview');
   els.editorPreview.classList.add('hidden');
@@ -1470,7 +1470,7 @@ function openComposer(note) {
     ? record.fields.map(function (/** @type {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} */ field) { return { ...field }; })
     : createDefaultPasswordFields();
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
-  els.editorTitle.value = note ? note.title : '';
+  els.editorTitle.value = note ? String(note.title || record?.title || '') : '';
   els.editorContent.value = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
   renderComposerFolderSelect();
   updateComposerRecordType(recordType);
@@ -1702,8 +1702,8 @@ async function saveComposer() {
   updateComposerSaving(true);
   try {
   const password = state.editorRecordType === 'password';
-  const passwordPayload = password ? buildPasswordSavePayload(state.editorPasswordFields, state.editorFolderId) : null;
-  const title = passwordPayload ? passwordPayload.title : (els.editorTitle.value.trim() || '无标题');
+  const title = els.editorTitle.value.trim() || '无标题';
+  const passwordPayload = password ? buildPasswordSavePayload(title, state.editorPasswordFields, state.editorFolderId) : null;
   await Promise.all(state.attachmentDraft.images.map(function (image) {
     if (image.error) throw image.error;
     return image.uploadPromise || Promise.resolve();
