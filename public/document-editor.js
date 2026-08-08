@@ -63,7 +63,7 @@ function isSafeLink(url) {
 
 /** @param {string} value */
 function escapeText(value) {
-  return String(value || '').replace(/[\\`*_~\[\]]/g, '\\$&');
+  return String(value || '').replace(/(?<!\\)[`*_~\[\]]/g, '\\$&');
 }
 
 /** @param {any} node @returns {string} */

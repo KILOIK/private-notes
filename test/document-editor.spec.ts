@@ -17,7 +17,10 @@ class EditorNode {
 	}
 
 	append(...children: EditorNode[]) {
-		this.childNodes.push(...children);
+		children.forEach((child) => {
+			if (!child.tagName && child.childNodes.length) this.childNodes.push(...child.childNodes);
+			else this.childNodes.push(child);
+		});
 	}
 
 	replaceChildren(...children: EditorNode[]) {
@@ -127,6 +130,22 @@ describe('controlled Markdown document editor', () => {
 		]));
 
 		expect(serializeEditorMarkdown(editor as never)).toBe('```ts\nconst value = 1;\n```');
+	});
+
+	it('preserves a literal backslash in a text node when serializing', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('p', [text(String.raw`pmr\_01@126.com`)]));
+		expect(serializeEditorMarkdown(editor as never)).toBe(String.raw`pmr\_01@126.com`);
+	});
+
+	it('keeps markdown escapes stable after loading and serializing', () => {
+		const { documentStub } = createEditorDocument();
+		withDocument(documentStub, () => {
+			const editor = new EditorNode('div');
+			const source = String.raw`联系 pmr\_01@126.com`;
+			loadEditorMarkdown(editor as never, source);
+			expect(serializeEditorMarkdown(editor as never)).toBe(source);
+		});
 	});
 
 	it('keeps nested list indentation when serializing wrapped blocks', () => {
