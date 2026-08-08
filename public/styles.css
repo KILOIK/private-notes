@@ -657,6 +657,7 @@ button, input, textarea { font: inherit; }
     min-width: 0;
     padding: 0 13px;
   }
+  .is-document-composer .document-toolbar { position: static; }
   .textarea {
     min-height: 48dvh;
     font-size: 16px;
