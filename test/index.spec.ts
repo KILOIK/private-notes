@@ -303,6 +303,10 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('editorSourceMarkdown');
 		expect(appScript).toContain('editorSourceDirty');
 		expect(appScript).toContain('state.editorSourceDirty = false;');
+		const sourceBufferStart = appScript.indexOf('function getEditorSourceMarkdown()');
+		const sourceBufferEnd = appScript.indexOf('\n}\n', sourceBufferStart) + 3;
+		expect(sourceBufferStart).toBeGreaterThanOrEqual(0);
+		expect(appScript.slice(sourceBufferStart, sourceBufferEnd)).toContain('state.editorSourceDirty = false;');
 		expect(appScript).toContain("els.editorCard.addEventListener('drop'");
 		expect(appScript).toContain('function setSettingsBackgroundInert(inert)');
 		expect(appScript).toContain('[els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn]');

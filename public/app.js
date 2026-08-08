@@ -1573,6 +1573,7 @@ function markEditorSourceDirty() {
 function getEditorSourceMarkdown() {
   if (!state.editorSourceDirty) return state.editorSourceMarkdown;
   state.editorSourceMarkdown = serializeEditorMarkdown(els.documentEditor);
+  state.editorSourceDirty = false;
   return state.editorSourceMarkdown;
 }
 
