@@ -134,6 +134,7 @@ function renderInline(text, attachments, pendingAttachments) {
         const resolved = attachments.get(id);
         if (resolved) {
           const image = document.createElement('img');
+          image.setAttribute('data-markdown-src', url);
           image.src = resolved;
           image.alt = groups.imageAlt || '图片';
           image.loading = 'lazy';
@@ -145,6 +146,7 @@ function renderInline(text, attachments, pendingAttachments) {
         const resolved = pendingAttachments.get(url);
         if (resolved) {
           const image = document.createElement('img');
+          image.setAttribute('data-markdown-src', url);
           image.src = resolved;
           image.alt = groups.imageAlt || '图片';
           image.loading = 'lazy';

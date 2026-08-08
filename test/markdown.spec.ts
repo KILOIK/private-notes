@@ -19,6 +19,7 @@ class MarkdownTestNode {
 	alt = '';
 	loading = '';
 	className = '';
+	attributes = new Map<string, string>();
 
 	constructor(tagName = '') {
 		this.tagName = tagName.toUpperCase();
@@ -26,6 +27,10 @@ class MarkdownTestNode {
 
 	append(...children: MarkdownTestNode[]) {
 		this.childNodes.push(...children);
+	}
+
+	setAttribute(name: string, value: string) {
+		this.attributes.set(name, value);
 	}
 }
 
