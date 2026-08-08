@@ -49,7 +49,7 @@ export function buildNavigationModel(notes, folders, activeCategory, activeFolde
   });
 }
 
-/** @param {WorkspaceNote[]} notes @param {NoteSortKey} sortKey */
+/** @template {WorkspaceNote} T @param {T[]} notes @param {NoteSortKey} sortKey @returns {T[]} */
 export function sortVisibleNotes(notes, sortKey) {
   return notes.slice().sort(function (a, b) {
     if (sortKey === 'title') {

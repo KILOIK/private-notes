@@ -130,7 +130,20 @@
             <button id="trashNav" class="navigation-command" type="button"><span class="nav-item-icon" aria-hidden="true">▣</span><span class="nav-item-label">最近删除</span><span id="trashNavCount" class="nav-item-count">0</span></button>
           </aside>
           <section id="feedView" class="workspace-feed" aria-labelledby="listTitle">
-            <div class="list-head"><h2 id="listTitle">全部笔记</h2><div id="noteCount">0 条</div></div>
+            <div class="list-head">
+              <div class="list-head-title"><h2 id="listTitle">全部笔记</h2><div id="noteCount">0 条</div></div>
+              <div class="list-head-actions">
+                <div class="sort-control">
+                  <button id="sortBtn" class="icon-btn" type="button" aria-label="排序笔记" aria-haspopup="menu" aria-expanded="false">↕</button>
+                  <div id="sortMenu" class="sort-menu hidden" role="menu" aria-label="笔记排序">
+                    <button type="button" role="menuitem" data-sort-key="updated">最近更新</button>
+                    <button type="button" role="menuitem" data-sort-key="created">最近创建</button>
+                    <button type="button" role="menuitem" data-sort-key="title">标题</button>
+                  </div>
+                </div>
+                <button id="feedNewBtn" class="icon-btn feed-new-btn" type="button" aria-label="新建笔记">＋</button>
+              </div>
+            </div>
             <div id="noteListScroll" class="note-list-scroll"><div id="noteList" class="note-list"></div></div>
           </section>
           <section id="readerView" class="workspace-reader" aria-labelledby="readerTitle" aria-live="polite">

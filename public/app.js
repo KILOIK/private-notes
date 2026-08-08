@@ -10,7 +10,7 @@ import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { setComposerSaving } from './composer-saving.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
-import { buildNavigationModel } from './workspace-model.js';
+import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -56,6 +56,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * folderMap: Map<string, { id: string, name: string, created_at: number, updated_at: number }>,
  * activeCategory: 'all' | 'note' | 'password',
  * activeFolderId: string | null | undefined
+ * sortKey: 'updated' | 'created' | 'title'
  * editorRecordType: 'note' | 'password'
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorFolderId: string | null
@@ -105,6 +106,7 @@ const state = {
   folderMap: new Map(),
   activeCategory: 'all',
   activeFolderId: undefined,
+  sortKey: 'updated',
   editorRecordType: 'note',
   editorPasswordFields: [],
   editorFolderId: null,
@@ -202,6 +204,9 @@ const els = {
   confirmTotpBtn: getButton('confirmTotpBtn'),
   noteCount: getElement('noteCount'),
   noteList: getElement('noteList'),
+  sortBtn: getButton('sortBtn'),
+  sortMenu: getElement('sortMenu'),
+  feedNewBtn: getButton('feedNewBtn'),
   readerView: getElement('readerView'),
   readerEmptyState: getElement('readerEmptyState'),
   readerDetail: getElement('readerDetail'),
@@ -1247,7 +1252,7 @@ function renderList() {
     els.noteList.appendChild(warning);
   }
 
-  state.notes.forEach(function (note) {
+  sortVisibleNotes(state.notes, state.sortKey).forEach(function (note) {
     const record = note.record || decodeNoteRecord(note.content);
     const viewModel = buildNoteCardViewModel({
       title: note.title,
@@ -2127,9 +2132,30 @@ els.newBtn.onclick = function () {
   openComposer(null);
 };
 
+els.feedNewBtn.onclick = function () {
+  openComposer(null);
+};
+
 els.fabNewBtn.onclick = function () {
   openComposer(null);
 };
+
+els.sortBtn.onclick = function () {
+  const open = els.sortMenu.classList.toggle('hidden') === false;
+  els.sortBtn.setAttribute('aria-expanded', String(open));
+};
+
+els.sortMenu.querySelectorAll('[data-sort-key]').forEach(function (element) {
+  element.addEventListener('click', function () {
+    const key = element.getAttribute('data-sort-key');
+    if (key !== 'updated' && key !== 'created' && key !== 'title') return;
+    state.sortKey = key;
+    els.sortMenu.classList.add('hidden');
+    els.sortBtn.setAttribute('aria-expanded', 'false');
+    renderList();
+    setStatus(key === 'updated' ? '已按最近更新排序' : key === 'created' ? '已按最近创建排序' : '已按标题排序');
+  });
+});
 
 els.unlockBtn.onclick = function () {
   unlockVault(els.vaultUnlockInput.value, false)
