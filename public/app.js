@@ -61,6 +61,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorFolderId: string | null
  * composerSaving: boolean
+ * editingInline: boolean
  * workspaceMode: 'wide' | 'compact' | 'mobile'
  * navigationOpen: boolean
  * navigationReturnFocus: HTMLElement | null
@@ -111,6 +112,7 @@ const state = {
   editorPasswordFields: [],
   editorFolderId: null,
   composerSaving: false,
+  editingInline: false,
   workspaceMode: getWorkspaceMode(window.innerWidth),
   navigationOpen: false,
   navigationReturnFocus: null,
@@ -219,10 +221,13 @@ const els = {
   readerMoreBtn: getButton('readerMoreBtn'),
   readerTitle: getElement('readerTitle'),
   readerContent: getElement('readerContent'),
+  readerDocument: getElement('readerDocument'),
+  readerEditor: getElement('readerEditor'),
   passwordFields: getElement('passwordFields'),
   readerMoreMenu: getElement('readerMoreMenu'),
   readerDeleteBtn: getButton('readerDeleteBtn'),
   editorModal: getElement('editorModal'),
+  editorCard: getElement('editorCard'),
   modalTitle: getElement('modalTitle'),
   editorTitle: getInput('editorTitle'),
   editorFolder: getSelect('editorFolder'),
@@ -300,7 +305,7 @@ function updateScrollUi() {
 }
 
 function updateModalUi() {
-  const open = !els.editorModal.classList.contains('hidden') || !els.shareModal.classList.contains('hidden') || !els.folderDialog.classList.contains('hidden');
+  const open = (!state.editingInline && !els.editorModal.classList.contains('hidden')) || !els.shareModal.classList.contains('hidden') || !els.folderDialog.classList.contains('hidden');
   [els.topbar, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
     element.classList.toggle('modal-obscured', open);
   });
@@ -1365,7 +1370,7 @@ function updateComposerSaving(saving) {
     saveButton: els.saveBtn,
     cancelButton: els.cancelBtn,
     closeButton: els.closeModalBtn,
-    modal: els.editorModal
+    modal: state.editingInline ? els.readerEditor : els.editorModal
   }, saving);
 }
 
@@ -1407,7 +1412,19 @@ function openComposer(note) {
   renderComposerFolderSelect();
   updateComposerRecordType(recordType);
   setAttachmentStatus('');
-  els.editorModal.classList.remove('hidden');
+  state.editingInline = Boolean(note && recordType === 'note');
+  if (state.editingInline) {
+    els.readerDocument.classList.add('hidden');
+    els.readerEditor.appendChild(els.editorCard);
+    els.readerEditor.classList.remove('hidden');
+    els.readerDetail.classList.add('is-editing');
+    els.editorCard.classList.add('reader-editor-card');
+    els.editorModal.classList.add('hidden');
+  } else {
+    els.editorModal.appendChild(els.editorCard);
+    els.editorCard.classList.remove('reader-editor-card');
+    els.editorModal.classList.remove('hidden');
+  }
   updateModalUi();
   focusComposerPrimaryField(recordType, els.editorTitle, els.passwordEditorFields);
 }
@@ -1419,7 +1436,15 @@ function closeComposer(discardDraft = true) {
     clearAttachmentDraft(state.attachmentDraft);
     state.pendingAttachmentIds = [];
   }
+  if (state.editingInline) {
+    els.readerEditor.classList.add('hidden');
+    els.editorModal.appendChild(els.editorCard);
+    els.editorCard.classList.remove('reader-editor-card');
+    els.readerDocument.classList.remove('hidden');
+    els.readerDetail.classList.remove('is-editing');
+  }
   els.editorModal.classList.add('hidden');
+  state.editingInline = false;
   state.editingId = null;
   state.editorPasswordFields = [];
   state.editorFolderId = null;
@@ -1433,6 +1458,7 @@ function closeComposer(discardDraft = true) {
 
 /** @param {string} noteId */
 async function openReader(noteId) {
+  if (state.editingInline) throw new Error('请先保存或取消当前编辑');
   const note = state.allNotes.find(function (item) { return item.id === noteId; });
   if (!note || note.decryptFailed) throw new Error('找不到可阅读的笔记');
   if (!state.vaultKey) throw new Error('请先解锁内容');
@@ -1498,6 +1524,10 @@ async function openReader(noteId) {
 }
 
 function closeReader() {
+  if (state.editingInline) {
+    setStatus('请先保存或取消当前编辑');
+    return;
+  }
   state.readerOperation.cancel();
   clearAttachmentUrls();
   els.readerEmptyState.classList.remove('hidden');
@@ -1657,8 +1687,10 @@ async function saveComposer() {
     });
   }
 
+  const reopenReaderId = state.editingInline ? state.editingId : null;
   closeComposer(false);
   await refreshNotes();
+  if (reopenReaderId) await openReader(reopenReaderId);
   setStatus('已保存');
   } finally {
     updateComposerSaving(false);
@@ -2278,7 +2310,7 @@ function handleEditorPaste(event) {
 }
 
 els.editorContent.addEventListener('paste', handleEditorPaste);
-els.editorModal.addEventListener('paste', handleEditorPaste);
+els.editorCard.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('dragover', function (event) {
   event.preventDefault();
@@ -2345,7 +2377,7 @@ document.addEventListener('keydown', function (event) {
     } else if (!els.shareModal.classList.contains('hidden')) {
       event.preventDefault();
       closeShareDialog();
-    } else if (!els.editorModal.classList.contains('hidden')) {
+    } else if (state.editingInline || !els.editorModal.classList.contains('hidden')) {
       if (state.composerSaving) setStatus('正在保存，请稍候');
       else closeComposer();
     } else if (state.navigationOpen) {
@@ -2358,7 +2390,7 @@ document.addEventListener('keydown', function (event) {
     }
   }
   const isSave = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's';
-  if (isSave && !els.editorModal.classList.contains('hidden')) {
+  if (isSave && (state.editingInline || !els.editorModal.classList.contains('hidden'))) {
     event.preventDefault();
     saveComposer().catch(function (error) {
       setStatus(error.message || '保存失败');

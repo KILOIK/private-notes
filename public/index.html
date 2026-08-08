@@ -159,11 +159,12 @@
                   <button id="readerMoreBtn" class="icon-btn" type="button" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false">⋯</button>
                 </div>
               </div>
-              <article class="reader-document">
+              <article id="readerDocument" class="reader-document">
                 <h2 id="readerTitle" class="reader-title"></h2>
                 <div id="readerContent" class="markdown-body"></div>
                 <div id="passwordFields" class="password-fields hidden" aria-label="密码字段"></div>
               </article>
+              <section id="readerEditor" class="reader-editor hidden" aria-label="编辑笔记"></section>
               <div id="readerMoreMenu" class="more-menu hidden" role="menu"><button id="readerDeleteBtn" class="btn danger" type="button" role="menuitem">删除笔记</button></div>
             </div>
           </section>
@@ -173,7 +174,7 @@
     </div>
 
     <div id="editorModal" class="modal-backdrop hidden">
-      <div class="card modal-card">
+      <div id="editorCard" class="card modal-card">
         <div class="modal-head">
           <div>
             <h2 id="modalTitle" class="section-title">新建笔记</h2>

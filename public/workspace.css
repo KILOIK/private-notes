@@ -447,6 +447,11 @@
   min-height: 100%;
 }
 
+.reader-detail.is-editing .reader-actions,
+.reader-detail.is-editing .reader-back {
+  display: none;
+}
+
 .reader-head {
   position: sticky;
   top: 0;
@@ -502,6 +507,26 @@
   width: min(760px, 100%);
   margin: 0 auto;
   padding: 28px 48px 64px;
+}
+
+.reader-editor {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 24px 48px 64px;
+}
+
+.reader-editor-card {
+  width: 100%;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.reader-editor-card .textarea {
+  min-height: min(56dvh, 640px);
 }
 
 .reader-title {
@@ -858,6 +883,14 @@ a:focus-visible {
 
   .reader-document {
     padding: 20px 16px calc(40px + env(safe-area-inset-bottom));
+  }
+
+  .reader-editor {
+    padding: 14px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .reader-editor-card .textarea {
+    min-height: 54dvh;
   }
 
   .reader-title {
