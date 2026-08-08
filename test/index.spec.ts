@@ -214,6 +214,11 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('settingsBtn');
 		expect(appHtml).toContain('settingsPanel');
 		expect(appHtml).toContain('settingsLogoutBtn');
+		expect(appHtml).toContain('role="dialog"');
+		expect(appHtml).toContain('aria-modal="true"');
+		expect(appHtml).toContain('class="settings-backdrop hidden"');
+		expect(appHtml).toContain('class="settings-btn-label"');
+		expect(appHtml).toContain('class="settings-btn-icon"');
 		expect(appHtml).toContain('passwordFields');
 		expect(appHtml).toContain('passwordEditorFields');
 		expect(appHtml).toContain('id="editorTitle"');
@@ -239,7 +244,8 @@ describe('private-notes worker', () => {
 		const requiredIds = ['navigationBtn', 'workspaceNavigation', 'closeNavigationBtn', 'navigationBackdrop',
 			'feedView', 'noteListScroll', 'readerEmptyState', 'readerDetail', 'readerCopyBtn',
 			'readerShareBtn', 'readerEditBtn', 'readerMoreBtn', 'readerEditor', 'readerDocument', 'editorCard',
-			'trashNav', 'readerRestoreBtn', 'readerPermanentDeleteBtn', 'newFolderBtn', 'sortBtn', 'feedNewBtn'];
+			'trashNav', 'readerRestoreBtn', 'readerPermanentDeleteBtn', 'newFolderBtn', 'sortBtn', 'feedNewBtn',
+			'settingsBackdrop'];
 		for (const id of requiredIds) expect(appHtml).toContain(`id="${id}"`);
 		expect(appHtml).toContain('id="sortMenu"');
 		expect(appHtml).not.toContain('id="categoryNav"');
@@ -271,6 +277,11 @@ describe('private-notes worker', () => {
 		expect(readerIndex).toBeGreaterThan(feedIndex);
 		const workspaceStyles = await env.ASSETS.fetch(new Request(`${ORIGIN}/workspace.css`));
 		expect(workspaceStyles.status).toBe(200);
+		const baseStyles = await env.ASSETS.fetch(new Request(`${ORIGIN}/styles.css`));
+		const baseStylesText = await baseStyles.text();
+		expect(baseStylesText).toContain('html.settings-open');
+		expect(baseStylesText).toContain('body.settings-open');
+		expect(baseStylesText).toContain('.settings-backdrop');
 
 		const appScriptResponse = await env.ASSETS.fetch(new Request(`${ORIGIN}/app.js`));
 		const appScript = await appScriptResponse.text();
@@ -278,6 +289,9 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('[els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn]');
 		expect(appScript).toContain('setSettingsBackgroundInert(true);');
 		expect(appScript).toContain('setSettingsBackgroundInert(false);');
+		expect(appScript).toContain('function setSettingsScrollLock(locked)');
+		expect(appScript).toContain("els.settingsBackdrop.classList.toggle('hidden', !open);");
+		expect(appScript).toContain('els.settingsBackdrop.onclick = closeSettings;');
 		expect(appScript).not.toContain('els.appView.inert = true;');
 		expect(appScript).toContain("from './workspace-view.js'");
 		expect(appScript).toContain('function syncWorkspacePresentation()');

@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { createLatestOperation } from '../public/latest-operation.js';
+import { getSettingsSurfaceState } from '../public/settings-ui-state.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from '../public/vault-ui-state.js';
 
 describe('sensitive UI state', () => {
+	it('reserves a scroll-lock state while the settings sheet is open', () => {
+		expect(getSettingsSurfaceState(true)).toEqual({
+			open: true,
+			ariaHidden: false,
+			backgroundInert: true,
+			scrollLocked: true,
+		});
+		expect(getSettingsSurfaceState(false)).toEqual({
+			open: false,
+			ariaHidden: true,
+			backgroundInert: false,
+			scrollLocked: false,
+		});
+	});
+
 	it('invalidates an older reader operation when a newer one starts or the reader closes', () => {
 		const operations = createLatestOperation();
 		const first = operations.begin();

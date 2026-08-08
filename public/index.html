@@ -63,11 +63,11 @@
               <button id="clearSearchBtn" class="clear-search" type="button" aria-label="清空搜索">×</button>
             </div>
             <button id="newBtn" class="btn topbar-new-btn">新建笔记</button>
-            <button id="settingsBtn" class="btn secondary" type="button" aria-label="打开设置" aria-expanded="false" aria-controls="settingsPanel">设置</button>
+            <button id="settingsBtn" class="btn secondary settings-trigger" type="button" aria-label="打开设置" aria-expanded="false" aria-controls="settingsPanel"><span class="settings-btn-label">设置</span><span class="settings-btn-icon" aria-hidden="true">⚙</span></button>
           </div>
         </header>
 
-        <aside id="settingsPanel" class="settings-drawer hidden" aria-hidden="true" aria-labelledby="settingsTitle" tabindex="-1">
+        <aside id="settingsPanel" class="settings-drawer hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="settingsTitle" tabindex="-1">
           <div class="settings-drawer-head">
             <div>
               <h2 id="settingsTitle" class="section-title">设置</h2>
@@ -95,6 +95,7 @@
           </section>
           <button id="settingsLogoutBtn" class="btn danger settings-logout" type="button">退出登录</button>
         </aside>
+        <button id="settingsBackdrop" class="settings-backdrop hidden" type="button" aria-label="关闭设置" aria-hidden="true"></button>
 
         <div id="statusLine" class="status-line"></div>
 

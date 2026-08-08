@@ -16,6 +16,7 @@ import { createComposerSaveRecovery, getComposerRetryNote, getUncommittedAttachm
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
+import { getSettingsSurfaceState } from './settings-ui-state.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number, deleted_at?: number|null }} RawNote
@@ -198,6 +199,7 @@ const els = {
   settingsBtn: getButton('settingsBtn'),
   closeSettingsBtn: getButton('closeSettingsBtn'),
   settingsPanel: getElement('settingsPanel'),
+  settingsBackdrop: getButton('settingsBackdrop'),
   settingsLogoutBtn: getButton('settingsLogoutBtn'),
   statusLine: getElement('statusLine'),
   vaultPanel: getElement('vaultPanel'),
@@ -411,6 +413,23 @@ function setSettingsBackgroundInert(inert) {
   });
 }
 
+/** @param {boolean} locked */
+function setSettingsScrollLock(locked) {
+  document.documentElement.classList.toggle('settings-open', locked);
+  document.body.classList.toggle('settings-open', locked);
+}
+
+/** @param {boolean} open */
+function setSettingsSurfaceOpen(open) {
+  const surface = getSettingsSurfaceState(open);
+  els.settingsPanel.classList.toggle('hidden', !open);
+  els.settingsPanel.setAttribute('aria-hidden', String(surface.ariaHidden));
+  els.settingsBackdrop.classList.toggle('hidden', !open);
+  els.settingsBackdrop.setAttribute('aria-hidden', String(surface.ariaHidden));
+  els.settingsBtn.setAttribute('aria-expanded', String(surface.open));
+  setSettingsScrollLock(surface.scrollLocked);
+}
+
 /** @param {boolean} inert */
 function setNavigationBackgroundInert(inert) {
   [els.topbar, els.feedView, els.readerView, els.fabNewBtn, els.fabTopBtn].forEach(function (element) {
@@ -420,17 +439,13 @@ function setNavigationBackgroundInert(inert) {
 
 function openSettings() {
   state.settingsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  els.settingsPanel.classList.remove('hidden');
-  els.settingsPanel.setAttribute('aria-hidden', 'false');
-  els.settingsBtn.setAttribute('aria-expanded', 'true');
+  setSettingsSurfaceOpen(true);
   setSettingsBackgroundInert(true);
   els.settingsPanel.focus();
 }
 
 function closeSettings() {
-  els.settingsPanel.classList.add('hidden');
-  els.settingsPanel.setAttribute('aria-hidden', 'true');
-  els.settingsBtn.setAttribute('aria-expanded', 'false');
+  setSettingsSurfaceOpen(false);
   setSettingsBackgroundInert(false);
   const returnFocus = state.settingsReturnFocus;
   state.settingsReturnFocus = null;
@@ -1119,6 +1134,7 @@ function showApp() {
 
 els.settingsBtn.onclick = openSettings;
 els.closeSettingsBtn.onclick = closeSettings;
+els.settingsBackdrop.onclick = closeSettings;
 els.settingsLogoutBtn.onclick = function () {
   logout().catch(function (error) {
     setStatus(error instanceof Error ? error.message : '退出失败');

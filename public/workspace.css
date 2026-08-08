@@ -903,6 +903,22 @@ a:focus-visible {
     font-size: 12px;
   }
 
+  #settingsBtn.settings-trigger {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+  }
+
+  #settingsBtn .settings-btn-label {
+    display: none;
+  }
+
+  #settingsBtn .settings-btn-icon {
+    display: inline;
+    font-size: 18px;
+    line-height: 1;
+  }
+
   #navigationBtn,
   .workspace-navigation .navigation-close {
     display: inline-grid;
