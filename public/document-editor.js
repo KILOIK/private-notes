@@ -15,6 +15,8 @@ const COMMANDS = new Map([
   ['code-block', ['formatBlock', '<pre>']],
 ]);
 
+const BLOCK_TAGS = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'UL', 'OL', 'PRE']);
+
 /** @param {unknown} value @returns {string} */
 function getText(value) {
   if (!value || typeof value !== 'object') return '';
@@ -34,6 +36,18 @@ function childrenOf(node) {
 function getAttribute(node, name) {
   if (node && typeof node.getAttribute === 'function') return node.getAttribute(name) || '';
   return String(node?.attributes?.[name] || node?.dataset?.[name.replace(/^data-/, '')] || '');
+}
+
+/** @param {any} node */
+function getTagName(node) {
+  return String(node?.tagName || '').toUpperCase();
+}
+
+/** @param {any} node */
+function hasBlockChild(node) {
+  return childrenOf(node).some(function (child) {
+    return BLOCK_TAGS.has(getTagName(child));
+  });
 }
 
 /** @param {string} url */
@@ -76,25 +90,61 @@ function serializeInline(node) {
   return childrenOf(node).map(serializeInline).join('');
 }
 
+/** @param {any} list @param {number} [depth] */
+function serializeList(list, depth = 0) {
+  const tag = getTagName(list);
+  const indent = '  '.repeat(depth);
+  return childrenOf(list).filter(function (child) {
+    return getTagName(child) === 'LI';
+  }).map(function (item, index) {
+    const children = childrenOf(item);
+    const nestedLists = children.filter(function (child) {
+      const childTag = getTagName(child);
+      return childTag === 'UL' || childTag === 'OL';
+    });
+    const content = children.filter(function (child) {
+      const childTag = getTagName(child);
+      return childTag !== 'UL' && childTag !== 'OL';
+    }).map(serializeInline).join('').trim();
+    const marker = tag === 'OL' ? `${index + 1}. ` : '- ';
+    const lines = [`${indent}${marker}${content}`.trimEnd()];
+    nestedLists.forEach(function (nested) {
+      const serialized = serializeList(nested, depth + 1);
+      if (serialized) lines.push(serialized);
+    });
+    return lines.join('\n');
+  }).join('\n').trimEnd();
+}
+
+/** @param {any[]} nodes */
+function serializeBlocks(nodes) {
+  return nodes.flatMap(function (node) {
+    const tag = getTagName(node);
+    if ((tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') && hasBlockChild(node)) {
+      return serializeBlocks(childrenOf(node));
+    }
+    const markdown = serializeBlock(node);
+    return markdown ? [markdown] : [];
+  });
+}
+
 /** @param {any} node */
 function serializeBlock(node) {
   if (!node) return '';
   if (node.nodeType === 3 || !node.tagName) return escapeText(String(node.textContent || '')).trim();
-  const tag = String(node.tagName).toUpperCase();
+  const tag = getTagName(node);
   if (/^H[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.slice(1)))} ${childrenOf(node).map(serializeInline).join('')}`.trim();
-  if (tag === 'P' || tag === 'DIV') return childrenOf(node).map(serializeInline).join('').trim();
+  if (tag === 'P' || tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') return childrenOf(node).map(serializeInline).join('').trim();
   if (tag === 'BLOCKQUOTE') {
-    return childrenOf(node).map(serializeInline).join('').split('\n').map((line) => `> ${line}`.trimEnd()).join('\n').trim();
+    return serializeBlocks(childrenOf(node)).join('\n').split('\n').map((line) => `> ${line}`.trimEnd()).join('\n').trim();
   }
   if (tag === 'UL' || tag === 'OL') {
-    return childrenOf(node).filter((child) => String(child.tagName || '').toUpperCase() === 'LI').map((item, index) => {
-      const prefix = tag === 'OL' ? `${index + 1}. ` : '- ';
-      return prefix + childrenOf(item).map(serializeInline).join('').trim();
-    }).join('\n').trim();
+    return serializeList(node);
   }
   if (tag === 'PRE') {
-    const code = childrenOf(node).find((child) => String(child.tagName || '').toUpperCase() === 'CODE');
-    const language = String(getAttribute(code, 'class') || '').replace(/^language-/, '');
+    const code = childrenOf(node).find((child) => getTagName(child) === 'CODE');
+    const languageMatch = /(?:^|\s)language-([\w-]+)/.exec(String(getAttribute(code, 'class') || ''));
+    const language = languageMatch ? languageMatch[1] : '';
     return `\`\`\`${language}\n${getText(code || node)}\n\`\`\``.trim();
   }
   return serializeInline(node).trim();
@@ -119,7 +169,7 @@ export function loadEditorMarkdown(editor, markdown, attachments = new Map(), pe
 
 /** @param {HTMLElement} editor */
 export function serializeEditorMarkdown(editor) {
-  return childrenOf(editor).map(serializeBlock).filter(Boolean).join('\n\n').trim();
+  return serializeBlocks(childrenOf(editor)).join('\n\n').trim();
 }
 
 /** @param {HTMLElement} editor @param {string} command @param {string} [value] */

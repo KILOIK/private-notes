@@ -108,6 +108,41 @@ describe('controlled Markdown document editor', () => {
 		].join('\n\n'));
 	});
 
+	it('keeps ordered lists when a browser wraps them in a div', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('div', [
+			element('ol', [
+				element('li', [text('第一项')]),
+				element('li', [text('第二项')]),
+			]),
+		]));
+
+		expect(serializeEditorMarkdown(editor as never)).toBe('1. 第一项\n2. 第二项');
+	});
+
+	it('keeps fenced code when a browser wraps pre/code nodes', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('div', [
+			element('pre', [element('code', [text('const value = 1;')], { class: 'language-ts' })]),
+		]));
+
+		expect(serializeEditorMarkdown(editor as never)).toBe('```ts\nconst value = 1;\n```');
+	});
+
+	it('keeps nested list indentation when serializing wrapped blocks', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('div', [
+			element('ol', [
+				element('li', [
+					text('父项'),
+					element('ul', [element('li', [text('子项')])]),
+				]),
+			]),
+		]));
+
+		expect(serializeEditorMarkdown(editor as never)).toBe('1. 父项\n  - 子项');
+	});
+
 	it('drops unsafe links to plain text and maps toolbar commands', () => {
 		const editor = new EditorNode('div');
 		const unsafeLink = element('a', [text('unsafe')], { href: 'javascript:alert(1)' });
