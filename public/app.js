@@ -10,6 +10,7 @@ import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { setComposerSaving } from './composer-saving.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
+import { buildNavigationModel } from './workspace-model.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
@@ -245,7 +246,13 @@ const els = {
   createShareBtn: getButton('createShareBtn'),
   copyShareLinkBtn: getButton('copyShareLinkBtn'),
   categoryNav: getElement('categoryNav'),
+  uncategorizedNav: getButton('uncategorizedNav'),
   folderNav: getElement('folderNav'),
+  navigationTotalCount: getElement('navigationTotalCount'),
+  navigationUncategorizedCount: getElement('navigationUncategorizedCount'),
+  trashNav: getButton('trashNav'),
+  trashNavCount: getElement('trashNavCount'),
+  newFolderBtn: getButton('newFolderBtn'),
   folderDialog: getElement('folderDialog'),
   folderList: getElement('folderList'),
   folderDialogMode: getElement('folderDialogMode'),
@@ -437,12 +444,14 @@ function renderFilterNav() {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  const uncategorizedActive = state.activeFolderId === null;
+  els.uncategorizedNav.classList.toggle('is-active', uncategorizedActive);
+  if (uncategorizedActive) els.uncategorizedNav.setAttribute('aria-current', 'page');
+  else els.uncategorizedNav.removeAttribute('aria-current');
   els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) {
     const button = /** @type {HTMLButtonElement} */ (element);
     const id = button.dataset.folderId || '';
-    const active = (id === '' && state.activeFolderId === undefined)
-      || (id === '__uncategorized__' && state.activeFolderId === null)
-      || (id !== '' && id !== '__uncategorized__' && id === state.activeFolderId);
+    const active = id !== '' && id !== '__uncategorized__' && id === state.activeFolderId;
     button.classList.toggle('is-active', active);
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
@@ -450,16 +459,45 @@ function renderFilterNav() {
 }
 
 function renderFolders() {
-  els.folderNav.querySelectorAll('[data-folder-id]:not([data-folder-id=""]):not([data-folder-id="__uncategorized__"])').forEach(function (element) { element.remove(); });
+  els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) { element.remove(); });
+  const empty = els.folderNav.querySelector('.folder-empty');
+  if (empty) empty.classList.toggle('hidden', state.folders.length > 0);
   state.folders.forEach(function (folder) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'folder-chip';
     button.dataset.folderId = folder.id;
-    button.textContent = folder.name;
+    const icon = document.createElement('span');
+    icon.className = 'nav-item-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '▰';
+    const label = document.createElement('span');
+    label.className = 'nav-item-label';
+    label.textContent = folder.name;
+    const count = document.createElement('span');
+    count.className = 'nav-item-count';
+    count.textContent = '0';
+    button.append(icon, label, count);
     els.folderNav.appendChild(button);
   });
   renderFilterNav();
+}
+
+function renderNavigationSummary() {
+  const model = buildNavigationModel(state.allNotes, state.folders, state.activeCategory, state.activeFolderId, 0);
+  els.navigationTotalCount.textContent = String(model.totalCount);
+  els.navigationUncategorizedCount.textContent = String(model.uncategorizedCount);
+  els.trashNavCount.textContent = String(model.trashCount);
+  els.categoryNav.querySelectorAll('[data-category-count]').forEach(function (element) {
+    const item = /** @type {HTMLElement} */ (element);
+    const key = item.dataset.categoryCount;
+    if (key === 'note' || key === 'password') item.textContent = String(model.categoryCounts[key]);
+  });
+  els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) {
+    const item = /** @type {HTMLElement} */ (element);
+    const count = item.querySelector('.nav-item-count');
+    if (count) count.textContent = String(model.folderCounts[item.dataset.folderId || ''] || 0);
+  });
 }
 
 function renderFolderManager() {
@@ -1002,6 +1040,7 @@ function applySearch() {
   });
   renderList();
   renderFilterNav();
+  renderNavigationSummary();
 }
 
 function showLogin() {
@@ -1066,6 +1105,19 @@ els.folderNav.addEventListener('click', function (event) {
   }
   els.noteListScroll.scrollTop = 0;
 });
+els.uncategorizedNav.onclick = function () {
+  state.activeFolderId = null;
+  applySearch();
+  if (state.workspaceMode !== 'wide') {
+    closeNavigation(false);
+    els.navigationBtn.focus();
+  }
+  els.noteListScroll.scrollTop = 0;
+};
+els.newFolderBtn.onclick = openFolderDialog;
+els.trashNav.onclick = function () {
+  setStatus('最近删除功能正在准备中');
+};
 els.manageFoldersBtn.onclick = openFolderDialog;
 els.closeFolderDialogBtn.onclick = closeFolderDialog;
 els.cancelFolderBtn.onclick = closeFolderDialog;
