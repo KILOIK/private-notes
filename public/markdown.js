@@ -121,62 +121,73 @@ function isSafeLink(url) {
 /** @param {string} text @param {Map<string, string>} attachments @param {Map<string, string>} pendingAttachments */
 function renderInline(text, attachments, pendingAttachments) {
   const fragment = document.createDocumentFragment();
-  const tokenPattern = /(!\[([^\]]*)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)|\[([^\]]+)\]\(([^)\s]+)\)|(`+)([^`]+)\3|(\*\*|__)(.+?)\10|(\*|_)(.+?)\11)/g;
+  const tokenPattern = /!\[(?<imageAlt>[^\]]*)\]\((?<imageUrl>[^)\s]+)(?:\s+["'](?<imageTitle>[^"']*)["'])?\)|\[(?<linkText>[^\]]+)\]\((?<linkUrl>[^)\s]+)\)|(?<codeTicks>`+)(?<codeText>[^`]+)\k<codeTicks>|(?<strongMarker>\*\*|__)(?<strongText>.+?)\k<strongMarker>|(?<strikeMarker>~~)(?<strikeText>.+?)\k<strikeMarker>|<u>(?<underlineText>.+?)<\/u>|(?<emMarker>\*|_)(?<emText>.+?)\k<emMarker>/g;
   let cursor = 0;
   let match;
   while ((match = tokenPattern.exec(text))) {
     if (match.index > cursor) fragment.append(document.createTextNode(text.slice(cursor, match.index)));
-    if (match[1]) {
-      const url = match[3];
+    const groups = match.groups || {};
+    if (typeof groups.imageUrl === 'string') {
+      const url = groups.imageUrl;
       if (url.toLowerCase().startsWith('attachment://')) {
         const id = url.slice('attachment://'.length).toLowerCase();
         const resolved = attachments.get(id);
         if (resolved) {
           const image = document.createElement('img');
           image.src = resolved;
-          image.alt = match[2] || '图片';
+          image.alt = groups.imageAlt || '图片';
           image.loading = 'lazy';
           fragment.append(image);
         } else {
-          fragment.append(document.createTextNode(match[2] || '[图片]'));
+          fragment.append(document.createTextNode(groups.imageAlt || '[图片]'));
         }
       } else if (url.toLowerCase().startsWith('pending://')) {
         const resolved = pendingAttachments.get(url);
         if (resolved) {
           const image = document.createElement('img');
           image.src = resolved;
-          image.alt = match[2] || '图片';
+          image.alt = groups.imageAlt || '图片';
           image.loading = 'lazy';
           fragment.append(image);
         } else {
-          fragment.append(document.createTextNode(match[2] || '[图片]'));
+          fragment.append(document.createTextNode(groups.imageAlt || '[图片]'));
         }
       } else {
-        fragment.append(document.createTextNode(match[2] || '[图片]'));
+        fragment.append(document.createTextNode(groups.imageAlt || '[图片]'));
       }
-    } else if (match[5]) {
-      if (isSafeLink(match[6])) {
+    } else if (typeof groups.linkText === 'string') {
+      if (isSafeLink(groups.linkUrl)) {
         const link = document.createElement('a');
-        link.href = match[6];
+        link.href = groups.linkUrl;
         link.target = '_blank';
         link.rel = 'noreferrer noopener';
-        link.textContent = match[5];
+        link.textContent = groups.linkText;
         fragment.append(link);
       } else {
-        fragment.append(document.createTextNode(match[5]));
+        fragment.append(document.createTextNode(groups.linkText));
       }
-    } else if (match[7]) {
+    } else if (groups.codeTicks) {
       const code = document.createElement('code');
-      code.textContent = match[8];
+      code.textContent = groups.codeText;
       fragment.append(code);
-    } else if (match[9]) {
+    } else if (groups.strongMarker) {
       const strong = document.createElement('strong');
-      strong.textContent = match[10];
+      strong.textContent = groups.strongText;
       fragment.append(strong);
-    } else {
+    } else if (groups.strikeMarker) {
+      const strike = document.createElement('s');
+      strike.textContent = groups.strikeText;
+      fragment.append(strike);
+    } else if (typeof groups.underlineText === 'string') {
+      const underline = document.createElement('u');
+      underline.textContent = groups.underlineText;
+      fragment.append(underline);
+    } else if (groups.emMarker) {
       const emphasis = document.createElement('em');
-      emphasis.textContent = match[12];
+      emphasis.textContent = groups.emText;
       fragment.append(emphasis);
+    } else {
+      fragment.append(document.createTextNode(match[0]));
     }
     cursor = match.index + match[0].length;
   }
