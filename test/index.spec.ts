@@ -218,6 +218,13 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('passwordEditorFields');
 		expect(appHtml).toContain('id="editorTitle"');
 		expect(appHtml).toContain('placeholder="记录标题"');
+		expect(appHtml).toContain('id="documentEditor"');
+		expect(appHtml).toContain('contenteditable="true"');
+		expect(appHtml).toContain('aria-label="笔记正文"');
+		expect(appHtml).toContain('data-editor-command="undo"');
+		expect(appHtml).toContain('data-editor-command="bold"');
+		expect(appHtml).toContain('data-editor-command="ordered-list"');
+		expect(appHtml).toContain('data-editor-command="code-block"');
 		expect(appHtml).toContain('folderDialog');
 		expect(appHtml).toContain('attachmentStatus');
 		expect(appHtml).toContain('per-field-copy');

@@ -1,5 +1,6 @@
 import { encryptSharedPayload } from './share-crypto.js';
-import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, extractAttachmentIds, renderMarkdown, insertMarkdownAtSelection } from './markdown.js';
+import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, extractAttachmentIds, renderMarkdown } from './markdown.js';
+import { loadEditorMarkdown, runEditorCommand, serializeEditorMarkdown } from './document-editor.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImages, revokeAttachmentUrls } from './attachment-crypto.js';
 import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePendingToken } from './attachment-draft.js';
 import { buildComposerFolderChoices, matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
@@ -245,10 +246,10 @@ const els = {
   editorFolder: getSelect('editorFolder'),
   passwordEditorFields: getElement('passwordEditorFields'),
   editorContent: getTextArea('editorContent'),
+  documentEditor: getElement('documentEditor'),
   editorToolbar: getElement('editorToolbar'),
   insertLinkBtn: getButton('insertLinkBtn'),
   insertImageBtn: getButton('insertImageBtn'),
-  togglePreviewBtn: getButton('togglePreviewBtn'),
   attachmentDropZone: getElement('attachmentDropZone'),
   attachmentStatus: getElement('attachmentStatus'),
   mobilePasteStatus: getElement('mobilePasteStatus'),
@@ -1401,8 +1402,10 @@ function updateComposerRecordType(recordType) {
   const password = recordType === 'password';
   state.editorRecordType = recordType;
   els.editorTitle.classList.remove('hidden');
+  els.editorCard.classList.toggle('is-document-composer', !password);
   els.passwordEditorFields.classList.toggle('hidden', !password);
-  els.editorContent.classList.toggle('hidden', password || state.editorMode === 'preview');
+  els.editorContent.classList.add('hidden');
+  els.documentEditor.classList.toggle('hidden', password);
   els.editorPreview.classList.add('hidden');
   els.editorToolbar.classList.toggle('hidden', password);
   els.attachmentDropZone.classList.toggle('hidden', password);
@@ -1462,9 +1465,16 @@ function openComposer(note) {
     : createDefaultPasswordFields();
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? String(note.title || record?.title || '') : '';
-  els.editorContent.value = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
+  const markdown = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
+  els.editorContent.value = markdown;
   renderComposerFolderSelect();
   updateComposerRecordType(recordType);
+  if (recordType === 'note') {
+    const attachmentMap = new Map(extractAttachmentIds(markdown).map(function (id) { return [id, `attachment://${id}`]; }));
+    loadEditorMarkdown(els.documentEditor, markdown, attachmentMap, state.attachmentDraft.pendingAttachments);
+  } else {
+    els.documentEditor.replaceChildren();
+  }
   setAttachmentStatus('');
   state.editingInline = Boolean(note && recordType === 'note');
   if (state.editingInline) {
@@ -1504,6 +1514,7 @@ function closeComposer(discardDraft = true) {
   state.editorFolderId = null;
   els.editorTitle.value = '';
   els.editorContent.value = '';
+  els.documentEditor.replaceChildren();
   els.passwordEditorFields.replaceChildren();
   els.editorPreview.replaceChildren();
   setAttachmentStatus('');
@@ -1631,19 +1642,6 @@ async function copyCurrentReaderNote() {
   setStatus('已复制：' + (note.title || '无标题'));
 }
 
-function updateEditorPreview() {
-  const editingNote = state.allNotes.find(function (note) { return note.id === state.editingId; });
-  if (editingNote && !buildReaderRenderPlan(editingNote.record || decodeNoteRecord(editingNote.content)).renderMarkdown) {
-    els.editorPreview.textContent = '密码记录不支持 Markdown 预览。';
-    return;
-  }
-  els.editorPreview.replaceChildren(renderMarkdown(
-    els.editorContent.value,
-    new Map(),
-    state.attachmentDraft.pendingAttachments
-  ));
-}
-
 /** @param {ReturnType<typeof addPendingImage>} pending */
 async function uploadPendingEditorImage(pending) {
   const noteId = state.editingId || state.attachmentDraft.noteId;
@@ -1672,7 +1670,26 @@ function queueEditorImage(image) {
   if (!state.vaultKey) throw new Error('请先解锁内容');
   if (!state.editingId && !state.attachmentDraft.noteId) state.attachmentDraft.noteId = crypto.randomUUID();
   const pending = addPendingImage(state.attachmentDraft, image);
-  insertMarkdownAtSelection(els.editorContent, `![图片](${pending.token})`);
+  const imageElement = document.createElement('img');
+  imageElement.src = pending.url;
+  imageElement.alt = '图片';
+  imageElement.setAttribute('data-markdown-src', pending.token);
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount) {
+    const range = selection.getRangeAt(0);
+    if (els.documentEditor.contains(range.commonAncestorContainer)) {
+      range.deleteContents();
+      range.insertNode(imageElement);
+      range.setStartAfter(imageElement);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      els.documentEditor.append(imageElement);
+    }
+  } else {
+    els.documentEditor.append(imageElement);
+  }
   setAttachmentStatus(`正在浏览器加密并上传 ${state.attachmentDraft.images.length} 张图片…`);
   const upload = uploadPendingEditorImage(pending);
   pending.uploadPromise = upload;
@@ -1685,7 +1702,6 @@ function queueEditorImage(image) {
     if (!state.attachmentDraft.images.includes(pending)) return;
     setAttachmentStatus(error instanceof Error ? error.message : '图片上传失败');
   });
-  if (state.editorMode === 'preview') updateEditorPreview();
 }
 
 async function saveComposer() {
@@ -1699,7 +1715,8 @@ async function saveComposer() {
     if (image.error) throw image.error;
     return image.uploadPromise || Promise.resolve();
   }));
-  let markdown = password ? '' : els.editorContent.value.trim();
+  let markdown = password ? '' : serializeEditorMarkdown(els.documentEditor);
+  els.editorContent.value = markdown;
   if (!password) {
     for (const image of state.attachmentDraft.images) {
       if (!image.attachmentId) throw new Error('图片尚未上传完成');
@@ -2363,33 +2380,25 @@ els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { 
 els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };
 els.disableTotpBtn.onclick = function () { disableTotp().catch(function (error) { setStatus(error.message || '关闭失败'); }); };
 
-els.editorToolbar.querySelectorAll('[data-markdown]').forEach(function (button) {
+els.editorToolbar.querySelectorAll('[data-editor-command]').forEach(function (button) {
   button.addEventListener('click', function () {
-    const insertion = button.getAttribute('data-markdown') || '';
-    insertMarkdownAtSelection(els.editorContent, insertion);
-    els.editorContent.focus();
+    const command = button.getAttribute('data-editor-command') || '';
+    runEditorCommand(els.documentEditor, command);
+    els.documentEditor.focus();
   });
-});
-els.togglePreviewBtn.onclick = function () {
-  state.editorMode = state.editorMode === 'source' ? 'preview' : 'source';
-  const preview = state.editorMode === 'preview';
-  els.editorContent.classList.toggle('hidden', preview);
-  els.editorPreview.classList.toggle('hidden', !preview);
-  els.togglePreviewBtn.textContent = preview ? '编辑源码' : '预览';
-  if (preview) updateEditorPreview();
-};
-els.editorContent.addEventListener('input', function () {
-  if (state.editorMode === 'preview') updateEditorPreview();
 });
 els.insertLinkBtn.onclick = function () {
   const url = window.prompt('输入 https/http 链接');
-  if (url) insertMarkdownAtSelection(els.editorContent, '[链接](' + url + ')');
-  els.editorContent.focus();
+  if (url && !runEditorCommand(els.documentEditor, 'link', url.trim())) setStatus('请输入有效的 http/https 链接');
+  els.documentEditor.focus();
 };
 els.insertImageBtn.onclick = function () {
-  els.editorContent.focus();
+  els.documentEditor.focus();
   setStatus('请直接在正文粘贴图片，或将图片拖入编辑区');
 };
+els.documentEditor.addEventListener('input', function () {
+  if (els.documentEditor.textContent?.trim()) els.documentEditor.removeAttribute('data-empty');
+});
 
 /** @param {ClipboardEvent} event */
 function handleEditorPaste(event) {
@@ -2410,7 +2419,7 @@ function handleEditorPaste(event) {
   }
 }
 
-els.editorContent.addEventListener('paste', handleEditorPaste);
+els.documentEditor.addEventListener('paste', handleEditorPaste);
 els.editorCard.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('paste', handleEditorPaste);
 els.attachmentDropZone.addEventListener('dragover', function (event) {

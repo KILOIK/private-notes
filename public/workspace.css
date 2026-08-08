@@ -966,6 +966,10 @@ a:focus-visible {
     min-height: 54dvh;
   }
 
+  .reader-editor-card .document-editor {
+    min-height: 54dvh;
+  }
+
   .reader-title {
     font-size: 26px;
   }
@@ -1002,8 +1006,10 @@ a:focus-visible {
     font-size: 16px;
   }
 
-  .editor-toolbar {
-    flex-wrap: wrap;
+  .document-toolbar {
+    margin-bottom: 10px;
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .btn,

@@ -195,21 +195,27 @@
           <span class="per-field-copy">每个字段都可以单独复制</span>
         </div>
         <div class="editor-spacer"></div>
-        <div id="editorToolbar" class="editor-toolbar" role="toolbar" aria-label="Markdown 工具栏">
-          <button class="btn secondary" type="button" data-markdown="## ">标题</button>
-          <button class="btn secondary" type="button" data-markdown="**">粗体</button>
-          <button class="btn secondary" type="button" data-markdown="*">斜体</button>
-          <button class="btn secondary" type="button" data-markdown="- ">列表</button>
-          <button class="btn secondary" type="button" data-markdown="> ">引用</button>
-          <button class="btn secondary" type="button" data-markdown="`">代码</button>
+        <div id="editorToolbar" class="editor-toolbar document-toolbar" role="toolbar" aria-label="文档工具栏">
+          <button class="btn secondary" type="button" data-editor-command="undo">撤销</button>
+          <button class="btn secondary" type="button" data-editor-command="redo">重做</button>
+          <button class="btn secondary" type="button" data-editor-command="paragraph">正文</button>
+          <button class="btn secondary" type="button" data-editor-command="heading">标题</button>
+          <button class="btn secondary" type="button" data-editor-command="bold">粗体</button>
+          <button class="btn secondary" type="button" data-editor-command="italic">斜体</button>
+          <button class="btn secondary" type="button" data-editor-command="underline">下划线</button>
+          <button class="btn secondary" type="button" data-editor-command="strike">删除线</button>
+          <button class="btn secondary" type="button" data-editor-command="quote">引用</button>
+          <button class="btn secondary" type="button" data-editor-command="unordered-list">列表</button>
+          <button class="btn secondary" type="button" data-editor-command="ordered-list">编号</button>
+          <button class="btn secondary" type="button" data-editor-command="code-block">代码块</button>
           <button id="insertLinkBtn" class="btn secondary" type="button">链接</button>
           <button id="insertImageBtn" class="btn secondary" type="button">图片</button>
-          <button id="togglePreviewBtn" class="btn secondary" type="button">预览</button>
         </div>
         <div id="attachmentDropZone" class="attachment-drop-zone" tabindex="0">将图片粘贴或拖到这里，图片会先在浏览器加密</div>
         <div id="attachmentStatus" class="attachment-status" role="status"></div>
         <div id="mobilePasteStatus" class="attachment-status" role="status" aria-live="polite">手机端可直接在正文区域粘贴图片</div>
-        <textarea id="editorContent" class="textarea" placeholder="# 今天想到什么&#10;&#10;- 一条记录&#10;- 一个链接&#10;- 一个待办"></textarea>
+        <div id="documentEditor" class="document-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="笔记正文" data-placeholder="开始写作…"></div>
+        <textarea id="editorContent" class="textarea hidden" aria-hidden="true" tabindex="-1"></textarea>
         <div id="editorPreview" class="markdown-body editor-preview hidden"></div>
         <div class="modal-actions">
           <button id="cancelBtn" class="btn secondary">取消</button>
