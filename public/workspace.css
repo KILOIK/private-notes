@@ -503,6 +503,12 @@
   color: #166534;
 }
 
+.danger-icon:hover,
+.danger-icon:focus-visible {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .reader-document {
   width: min(760px, 100%);
   margin: 0 auto;

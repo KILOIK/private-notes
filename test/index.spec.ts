@@ -225,7 +225,7 @@ describe('private-notes worker', () => {
 		const requiredIds = ['navigationBtn', 'workspaceNavigation', 'closeNavigationBtn', 'navigationBackdrop',
 			'feedView', 'noteListScroll', 'readerEmptyState', 'readerDetail', 'readerCopyBtn',
 			'readerShareBtn', 'readerEditBtn', 'readerMoreBtn', 'readerEditor', 'readerDocument', 'editorCard',
-			'trashNav', 'newFolderBtn', 'sortBtn', 'feedNewBtn'];
+			'trashNav', 'readerRestoreBtn', 'readerPermanentDeleteBtn', 'newFolderBtn', 'sortBtn', 'feedNewBtn'];
 		for (const id of requiredIds) expect(appHtml).toContain(`id="${id}"`);
 		expect(appHtml).toContain('id="sortMenu"');
 		expect(appHtml).toContain('id="navigationTotalCount"');

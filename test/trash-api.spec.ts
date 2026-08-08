@@ -63,7 +63,7 @@ describe('note trash API', () => {
 		expect(deletedBody.note.deleted_at).toEqual(expect.any(Number));
 
 		const normalList = await api('/api/notes', { headers: { cookie } });
-		expect((await normalList.json()) as { notes: unknown[] }).toMatchObject({ notes: [] });
+		expect((await normalList.json()) as { notes: unknown[]; trashCount: number }).toMatchObject({ notes: [], trashCount: 1 });
 		const trashList = await api('/api/notes?trash=1', { headers: { cookie } });
 		expect((await trashList.json()) as { notes: Array<{ id: string }> }).toMatchObject({ notes: [{ id: created.note.id }] });
 

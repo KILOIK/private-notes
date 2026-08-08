@@ -476,6 +476,15 @@ async function listTrashedNotes(env: AppEnv, vaultId: string, cursor: TrashCurso
 	return { notes, nextCursor: hasMore && notes.length ? encodeTrashCursor(notes[notes.length - 1]) : null };
 }
 
+async function countTrashedNotes(env: AppEnv, vaultId: string) {
+	const row = await env.DB.prepare(
+		'SELECT COUNT(*) AS count FROM notes WHERE vault_id = ? AND deleted_at IS NOT NULL'
+	)
+		.bind(vaultId)
+		.first<{ count: number }>();
+	return Number(row?.count || 0);
+}
+
 async function getNote(env: AppEnv, id: string, vaultId: string) {
 	return env.DB.prepare(
 		`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
@@ -999,7 +1008,12 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		const result = trash === '1'
 			? await listTrashedNotes(env, vaultId, decodeTrashCursor(url.searchParams.get('cursor')), limit)
 			: await listNotes(env, vaultId, decodeNoteCursor(url.searchParams.get('cursor')), limit);
-		return json({ ok: true, notes: result.notes, nextCursor: result.nextCursor });
+		return json({
+			ok: true,
+			notes: result.notes,
+			nextCursor: result.nextCursor,
+			...(trash === '1' ? {} : { trashCount: await countTrashedNotes(env, vaultId) }),
+		});
 	}
 
 	if (url.pathname === '/api/notes' && request.method === 'POST') {

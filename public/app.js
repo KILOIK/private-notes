@@ -11,9 +11,10 @@ import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthSta
 import { setComposerSaving } from './composer-saving.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
+import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 
 /**
- * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number }} RawNote
+ * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number, deleted_at?: number|null }} RawNote
  * @typedef {RawNote & { encrypted: boolean, decryptFailed: boolean, record?: any, folderName?: string, attachmentIds?: string[] }} Note
  * @typedef {{ vaultSalt: string, cipher: 'aes-gcm-256', kdf: 'pbkdf2-sha256', iterations: number, version: 1, keyCheck: string | null }} CryptoConfig
  */
@@ -23,6 +24,9 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
 /** @type {{
  * notes: Note[],
  * allNotes: Note[],
+ * trashNotes: Note[],
+ * trashCount: number,
+ * trashMode: boolean,
  * editingId: string | null,
  * sharingNoteId: string | null,
  * shareOperationId: number,
@@ -74,6 +78,9 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
 const state = {
   notes: [],
   allNotes: [],
+  trashNotes: [],
+  trashCount: 0,
+  trashMode: false,
   editingId: null,
   sharingNoteId: null,
   shareOperationId: 0,
@@ -205,6 +212,7 @@ const els = {
   totpRecoveryCodes: getTextArea('totpRecoveryCodes'),
   confirmTotpBtn: getButton('confirmTotpBtn'),
   noteCount: getElement('noteCount'),
+  listTitle: getElement('listTitle'),
   noteList: getElement('noteList'),
   sortBtn: getButton('sortBtn'),
   sortMenu: getElement('sortMenu'),
@@ -219,6 +227,10 @@ const els = {
   readerShareBtn: getButton('readerShareBtn'),
   readerEditBtn: getButton('readerEditBtn'),
   readerMoreBtn: getButton('readerMoreBtn'),
+  readerStandardActions: getElement('readerStandardActions'),
+  readerTrashActions: getElement('readerTrashActions'),
+  readerRestoreBtn: getButton('readerRestoreBtn'),
+  readerPermanentDeleteBtn: getButton('readerPermanentDeleteBtn'),
   readerTitle: getElement('readerTitle'),
   readerContent: getElement('readerContent'),
   readerDocument: getElement('readerDocument'),
@@ -466,6 +478,9 @@ function renderFilterNav() {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  els.trashNav.classList.toggle('is-active', state.trashMode);
+  if (state.trashMode) els.trashNav.setAttribute('aria-current', 'page');
+  else els.trashNav.removeAttribute('aria-current');
 }
 
 function renderFolders() {
@@ -494,7 +509,7 @@ function renderFolders() {
 }
 
 function renderNavigationSummary() {
-  const model = buildNavigationModel(state.allNotes, state.folders, state.activeCategory, state.activeFolderId, 0);
+  const model = buildNavigationModel(state.allNotes, state.folders, state.activeCategory, state.activeFolderId, state.trashCount);
   els.navigationTotalCount.textContent = String(model.totalCount);
   els.navigationUncategorizedCount.textContent = String(model.uncategorizedCount);
   els.trashNavCount.textContent = String(model.trashCount);
@@ -635,6 +650,7 @@ function updateVaultUi() {
   els.searchInput.disabled = !state.vaultUnlocked;
   els.clearSearchBtn.disabled = !state.vaultUnlocked;
   els.newBtn.disabled = !state.vaultUnlocked;
+  els.feedNewBtn.disabled = !state.vaultUnlocked;
   els.fabNewBtn.disabled = !state.vaultUnlocked;
   els.vaultPanelDesc.textContent = state.unlockError
     ? state.unlockError + '。如果你已经忘记密码，旧密文无法在页面内恢复。'
@@ -933,9 +949,10 @@ async function decryptValue(value) {
 
 /**
  * @param {RawNote[]} rawNotes
+ * @param {boolean} [updateCounters]
  * @returns {Promise<Note[]>}
  */
-async function decryptNotes(rawNotes) {
+async function decryptNotes(rawNotes, updateCounters = true) {
   /** @type {Note[]} */
   const decrypted = [];
   let failedCount = 0;
@@ -954,6 +971,7 @@ async function decryptNotes(rawNotes) {
         created_at: note.created_at,
         updated_at: note.updated_at,
         revision: note.revision,
+        deleted_at: typeof note.deleted_at === 'number' ? note.deleted_at : null,
         encrypted: encrypted,
         decryptFailed: false,
         record: record,
@@ -968,14 +986,17 @@ async function decryptNotes(rawNotes) {
         created_at: note.created_at,
         updated_at: note.updated_at,
         revision: note.revision,
+        deleted_at: typeof note.deleted_at === 'number' ? note.deleted_at : null,
         encrypted: true,
         decryptFailed: true
       });
     }
   }
 
-  state.decryptFailedCount = failedCount;
-  state.legacyPlaintextCount = legacyPlaintextCount;
+  if (updateCounters) {
+    state.decryptFailedCount = failedCount;
+    state.legacyPlaintextCount = legacyPlaintextCount;
+  }
   if (rawNotes.length > 0 && failedCount === rawNotes.length) {
     throw new Error('本地解锁密钥不正确');
   }
@@ -1016,6 +1037,9 @@ async function refreshFolders() {
   state.allNotes.forEach(function (note) {
     if (note.record) note.folderName = resolveFolderName(state.folderMap, note.record.folderId);
   });
+  state.trashNotes.forEach(function (note) {
+    if (note.record) note.folderName = resolveFolderName(state.folderMap, note.record.folderId);
+  });
   if (typeof state.activeFolderId === 'string' && !state.folderMap.has(state.activeFolderId)) state.activeFolderId = null;
   renderFolders();
   if (!els.folderDialog.classList.contains('hidden')) renderFolderManager();
@@ -1040,8 +1064,11 @@ function filterNotes(notes, query) {
 }
 
 function applySearch() {
-  state.notes = filterNotes(state.allNotes, els.searchInput.value).filter(function (note) {
-    return matchesNoteFilter(note, state.activeCategory, state.activeFolderId, state.folderMap);
+  const source = state.trashMode ? state.trashNotes : state.allNotes;
+  state.notes = filterNotes(source, els.searchInput.value).filter(function (note) {
+    return state.trashMode
+      ? matchesNoteFilter(note, state.activeCategory, undefined, state.folderMap)
+      : matchesNoteFilter(note, state.activeCategory, state.activeFolderId, state.folderMap);
   });
   state.expandedIds.forEach(function (id) {
     if (!state.notes.find(function (note) { return note.id === id; })) {
@@ -1094,6 +1121,7 @@ els.categoryNav.addEventListener('click', function (event) {
   if (!(target instanceof HTMLButtonElement)) return;
   const category = target.dataset.category;
   if (category !== 'all' && category !== 'note' && category !== 'password') return;
+  state.trashMode = false;
   state.activeCategory = category;
   applySearch();
   if (state.workspaceMode !== 'wide') {
@@ -1107,6 +1135,7 @@ els.folderNav.addEventListener('click', function (event) {
   const target = event.target instanceof HTMLElement ? event.target.closest('[data-folder-id]') : null;
   if (!(target instanceof HTMLButtonElement)) return;
   const folderId = target.dataset.folderId || '';
+  state.trashMode = false;
   state.activeFolderId = folderId === '' ? undefined : folderId === '__uncategorized__' ? null : folderId;
   applySearch();
   if (state.workspaceMode !== 'wide') {
@@ -1116,6 +1145,7 @@ els.folderNav.addEventListener('click', function (event) {
   els.noteListScroll.scrollTop = 0;
 });
 els.uncategorizedNav.onclick = function () {
+  state.trashMode = false;
   state.activeFolderId = null;
   applySearch();
   if (state.workspaceMode !== 'wide') {
@@ -1126,7 +1156,17 @@ els.uncategorizedNav.onclick = function () {
 };
 els.newFolderBtn.onclick = openFolderDialog;
 els.trashNav.onclick = function () {
-  setStatus('最近删除功能正在准备中');
+  if (state.editingInline) {
+    setStatus('请先保存或取消当前编辑');
+    return;
+  }
+  state.trashMode = true;
+  state.activeCategory = 'all';
+  state.activeFolderId = undefined;
+  closeReader();
+  refreshTrash().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取最近删除失败');
+  });
 };
 els.manageFoldersBtn.onclick = openFolderDialog;
 els.closeFolderDialogBtn.onclick = closeFolderDialog;
@@ -1189,9 +1229,10 @@ async function api(url, options, behavior) {
 /**
  * Loads every cursor page once per refresh so local search covers the complete
  * vault, not only the first page.
+ * @param {boolean} [trash]
  * @returns {Promise<RawNote[]>}
  */
-async function fetchRawNotes() {
+async function fetchRawNotes(trash = false) {
   /** @type {RawNote[]} */
   const notes = [];
   /** @type {string | null} */
@@ -1199,12 +1240,14 @@ async function fetchRawNotes() {
   const seenCursors = new Set();
 
   do {
-    const query = cursor
-      ? '?limit=10&cursor=' + encodeURIComponent(cursor)
-      : '?limit=10';
+    const base = '?limit=10' + (trash ? '&trash=1' : '');
+    const query = cursor ? base + '&cursor=' + encodeURIComponent(cursor) : base;
     const data = await api('/api/notes' + query);
     if (!Array.isArray(data.notes)) {
       throw new Error('服务器返回的笔记列表格式无效');
+    }
+    if (!trash && Number.isSafeInteger(data.trashCount) && data.trashCount >= 0) {
+      state.trashCount = data.trashCount;
     }
     notes.push(...data.notes);
 
@@ -1223,11 +1266,12 @@ async function fetchRawNotes() {
 
 function renderList() {
   els.noteList.innerHTML = '';
+  els.listTitle.textContent = state.trashMode ? '最近删除' : state.activeCategory === 'password' ? '密码' : state.activeCategory === 'note' ? '笔记' : '全部笔记';
   els.noteCount.textContent = state.notes.length ? ('共 ' + state.notes.length + ' 条') : '0 条';
-  if (state.decryptFailedCount > 0) {
+  if (!state.trashMode && state.decryptFailedCount > 0) {
     els.noteCount.textContent += ' · ' + state.decryptFailedCount + ' 条无法解密';
   }
-  if (state.legacyPlaintextCount > 0) {
+  if (!state.trashMode && state.legacyPlaintextCount > 0) {
     els.noteCount.textContent += ' · ' + state.legacyPlaintextCount + ' 条待加密';
   }
 
@@ -1238,18 +1282,20 @@ function renderList() {
   }
 
   if (!state.notes.length) {
-    els.noteList.innerHTML = '<div class="empty-feed">现在还没有笔记。点击右上角“新建笔记”，写第一条就行。</div>';
+    els.noteList.innerHTML = state.trashMode
+      ? '<div class="empty-feed">最近删除中没有记录。</div>'
+      : '<div class="empty-feed">现在还没有笔记。点击右上角“新建笔记”，写第一条就行。</div>';
     return;
   }
 
-  if (state.decryptFailedCount > 0) {
+  if (!state.trashMode && state.decryptFailedCount > 0) {
     const warning = document.createElement('div');
     warning.className = 'decrypt-warning';
     warning.setAttribute('role', 'alert');
     warning.textContent = '有 ' + state.decryptFailedCount + ' 条笔记无法解密，已保留占位且不会被静默隐藏。请确认密码和加密配置后再处理。';
     els.noteList.appendChild(warning);
   }
-  if (state.legacyPlaintextCount > 0) {
+  if (!state.trashMode && state.legacyPlaintextCount > 0) {
     const warning = document.createElement('div');
     warning.className = 'decrypt-warning';
     warning.setAttribute('role', 'status');
@@ -1302,7 +1348,9 @@ function renderList() {
     const dates = document.createElement('div');
     dates.className = 'note-row-dates';
     const updated = document.createElement('span');
-    updated.textContent = '更新 ' + formatDate(viewModel.updatedAt);
+    updated.textContent = state.trashMode && typeof note.deleted_at === 'number'
+      ? '删除 ' + formatDate(note.deleted_at)
+      : '更新 ' + formatDate(viewModel.updatedAt);
     const created = document.createElement('span');
     created.textContent = '创建 ' + formatDate(viewModel.createdAt);
     dates.append(updated, created);
@@ -1329,6 +1377,9 @@ async function refreshNotes() {
   if (!state.vaultUnlocked) {
     state.notes = [];
     state.allNotes = [];
+    state.trashNotes = [];
+    state.trashCount = 0;
+    state.trashMode = false;
     state.decryptFailedCount = 0;
     state.legacyPlaintextCount = 0;
     await refreshMeta();
@@ -1339,6 +1390,18 @@ async function refreshNotes() {
   state.allNotes = await decryptNotes(await fetchRawNotes());
   state.noteCountMeta = state.allNotes.length;
   updateVaultUi();
+  applySearch();
+}
+
+async function refreshTrash() {
+  if (!state.vaultUnlocked) {
+    state.trashNotes = [];
+    state.trashCount = 0;
+    applySearch();
+    return;
+  }
+  state.trashNotes = await decryptNotes(await fetchRawNotes(true), false);
+  state.trashCount = state.trashNotes.length;
   applySearch();
 }
 
@@ -1459,7 +1522,8 @@ function closeComposer(discardDraft = true) {
 /** @param {string} noteId */
 async function openReader(noteId) {
   if (state.editingInline) throw new Error('请先保存或取消当前编辑');
-  const note = state.allNotes.find(function (item) { return item.id === noteId; });
+  const source = state.trashMode ? state.trashNotes : state.allNotes;
+  const note = source.find(function (item) { return item.id === noteId; });
   if (!note || note.decryptFailed) throw new Error('找不到可阅读的笔记');
   if (!state.vaultKey) throw new Error('请先解锁内容');
   const vaultKey = state.vaultKey;
@@ -1471,13 +1535,21 @@ async function openReader(noteId) {
   syncWorkspacePresentation();
   syncSelectedNoteRow();
   const record = note.record || decodeNoteRecord(note.content);
-  const actions = getReaderActionModel(record);
+  const actions = state.trashMode ? getTrashReaderActionModel() : getReaderActionModel(record);
   els.readerTitle.textContent = note.title || '无标题';
-  els.readerPath.textContent = (record.type === 'password' ? '密码' : '笔记') + ' / ' + (note.folderName || '未分类');
-  els.readerMeta.textContent = '创建 ' + formatDate(note.created_at) + ' · 更新 ' + formatDate(note.updated_at);
+  els.readerPath.textContent = (state.trashMode ? '最近删除 / ' : '') + (record.type === 'password' ? '密码' : '笔记') + ' / ' + (note.folderName || '未分类');
+  els.readerMeta.textContent = state.trashMode && typeof note.deleted_at === 'number'
+    ? '删除 ' + formatDate(getTrashRowMeta(note).primaryTime) + ' · 原更新 ' + formatDate(note.updated_at)
+    : '创建 ' + formatDate(note.created_at) + ' · 更新 ' + formatDate(note.updated_at);
+  els.readerStandardActions.classList.toggle('hidden', state.trashMode);
+  els.readerTrashActions.classList.toggle('hidden', !state.trashMode);
   els.readerCopyBtn.classList.toggle('hidden', !actions.copyVisible);
   els.readerShareBtn.classList.toggle('hidden', !actions.shareVisible);
   els.readerEditBtn.classList.toggle('hidden', !actions.editVisible);
+  els.readerRestoreBtn.classList.toggle('hidden', !actions.restoreVisible);
+  els.readerPermanentDeleteBtn.classList.toggle('hidden', !actions.permanentDeleteVisible);
+  els.readerMoreMenu.classList.add('hidden');
+  els.readerMoreBtn.setAttribute('aria-expanded', 'false');
   els.readerContent.replaceChildren();
   els.readerContent.classList.remove('hidden');
   els.passwordFields.replaceChildren();
@@ -1534,6 +1606,8 @@ function closeReader() {
   els.readerDetail.classList.add('hidden');
   els.readerMoreMenu.classList.add('hidden');
   els.readerMoreBtn.setAttribute('aria-expanded', 'false');
+  els.readerStandardActions.classList.remove('hidden');
+  els.readerTrashActions.classList.add('hidden');
   els.readerTitle.textContent = '';
   els.readerPath.textContent = '';
   els.readerMeta.textContent = '';
@@ -1551,8 +1625,9 @@ function closeReader() {
 }
 
 function getCurrentReaderNote() {
+  const source = state.trashMode ? state.trashNotes : state.allNotes;
   return state.readerNoteId
-    ? state.allNotes.find(function (note) { return note.id === state.readerNoteId; }) || null
+    ? source.find(function (note) { return note.id === state.readerNoteId; }) || null
     : null;
 }
 
@@ -1716,7 +1791,32 @@ async function deleteNote(id) {
   });
 
   await refreshNotes();
-  setStatus('已删除');
+  setStatus('已移入最近删除');
+}
+
+/** @param {Note} note */
+async function restoreNote(note) {
+  await api('/api/notes/' + encodeURIComponent(note.id) + '/restore', {
+    method: 'POST',
+    headers: { 'if-match': String(note.revision) }
+  });
+  closeReader();
+  await refreshNotes();
+  await refreshTrash();
+  setStatus('已恢复笔记');
+}
+
+/** @param {Note} note */
+async function permanentlyDeleteNote(note) {
+  if (!confirm('永久删除这条笔记及其附件？此操作无法恢复。')) return;
+  await api('/api/notes/' + encodeURIComponent(note.id) + '/permanent', {
+    method: 'DELETE',
+    headers: { 'if-match': String(note.revision) }
+  });
+  closeReader();
+  await refreshNotes();
+  await refreshTrash();
+  setStatus('已永久删除');
 }
 
 /** @param {Note} note */
@@ -2228,7 +2328,7 @@ els.readerCopyBtn.onclick = function () {
 };
 els.readerShareBtn.onclick = function () {
   const note = getCurrentReaderNote();
-  if (!note || note.decryptFailed) {
+  if (!note || note.decryptFailed || state.trashMode) {
     setStatus('找不到可分享的笔记');
     return;
   }
@@ -2240,7 +2340,7 @@ els.readerShareBtn.onclick = function () {
 };
 els.readerEditBtn.onclick = function () {
   const note = getCurrentReaderNote();
-  if (!note || note.decryptFailed) {
+  if (!note || note.decryptFailed || state.trashMode) {
     setStatus('找不到可编辑的笔记');
     return;
   }
@@ -2254,6 +2354,16 @@ els.readerDeleteBtn.onclick = function () {
   const note = getCurrentReaderNote();
   if (!note || note.decryptFailed) return;
   deleteNote(note.id).then(closeReader).catch(function (error) { setStatus(error.message || '删除失败'); });
+};
+els.readerRestoreBtn.onclick = function () {
+  const note = getCurrentReaderNote();
+  if (!note || note.decryptFailed || !state.trashMode) return;
+  restoreNote(note).catch(function (error) { setStatus(error.message || '恢复失败'); });
+};
+els.readerPermanentDeleteBtn.onclick = function () {
+  const note = getCurrentReaderNote();
+  if (!note || note.decryptFailed || !state.trashMode) return;
+  permanentlyDeleteNote(note).catch(function (error) { setStatus(error.message || '永久删除失败'); });
 };
 els.editorFolder.onchange = function () {
   state.editorFolderId = els.editorFolder.value || null;

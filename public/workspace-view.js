@@ -32,5 +32,5 @@ export function getWorkspaceScrollTarget(mode, readerNoteId) {
 /** @param {{type?: string}|null|undefined} record */
 export function getReaderActionModel(record) {
   const password = record?.type === 'password';
-  return Object.freeze({ copyVisible: !password, shareVisible: !password, editVisible: true });
+  return Object.freeze({ copyVisible: !password, shareVisible: !password, editVisible: true, restoreVisible: false, permanentDeleteVisible: false });
 }

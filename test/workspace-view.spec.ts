@@ -32,7 +32,7 @@ describe('workspace presentation', () => {
 	});
 
 	it('keeps password-wide operations unavailable', () => {
-		expect(getReaderActionModel({ type: 'note' })).toEqual({ copyVisible: true, shareVisible: true, editVisible: true });
-		expect(getReaderActionModel({ type: 'password' })).toEqual({ copyVisible: false, shareVisible: false, editVisible: true });
+		expect(getReaderActionModel({ type: 'note' })).toEqual({ copyVisible: true, shareVisible: true, editVisible: true, restoreVisible: false, permanentDeleteVisible: false });
+		expect(getReaderActionModel({ type: 'password' })).toEqual({ copyVisible: false, shareVisible: false, editVisible: true, restoreVisible: false, permanentDeleteVisible: false });
 	});
 });

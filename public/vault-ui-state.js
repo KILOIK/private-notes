@@ -2,6 +2,9 @@
  * @param {{
  *   notes: any[],
  *   allNotes: any[],
+ *   trashNotes?: any[],
+ *   trashCount?: number,
+ *   trashMode?: boolean,
  *   expandedIds: Set<string>,
  *   readerNoteId: string | null,
  *   decryptFailedCount: number,
@@ -11,6 +14,9 @@
 export function clearDecryptedNoteState(state) {
   state.notes = [];
   state.allNotes = [];
+  if ('trashNotes' in state) state.trashNotes = [];
+  if ('trashCount' in state) state.trashCount = 0;
+  if ('trashMode' in state) state.trashMode = false;
   state.expandedIds.clear();
   state.readerNoteId = null;
   state.decryptFailedCount = 0;
