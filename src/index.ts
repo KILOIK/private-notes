@@ -56,6 +56,7 @@ type Note = {
 	created_at: number;
 	updated_at: number;
 	revision: number;
+	deleted_at: number | null;
 };
 
 type Folder = {
@@ -68,6 +69,11 @@ type Folder = {
 type NoteCursor = {
 	id: string;
 	updatedAt: number;
+};
+
+type TrashCursor = {
+	id: string;
+	deletedAt: number;
 };
 
 type NoteShare = {
@@ -385,6 +391,30 @@ function decodeNoteCursor(value: string | null): NoteCursor | null {
 	}
 }
 
+function encodeTrashCursor(note: Note) {
+	if (note.deleted_at === null) throw new Error('trash cursor requires deleted note');
+	return base64UrlEncode(JSON.stringify({ deletedAt: note.deleted_at, id: note.id } satisfies TrashCursor));
+}
+
+function decodeTrashCursor(value: string | null): TrashCursor | null {
+	if (!value) return null;
+	try {
+		const parsed = JSON.parse(base64UrlDecode(value)) as Partial<TrashCursor>;
+		if (
+			!Number.isSafeInteger(parsed.deletedAt) ||
+			(parsed.deletedAt as number) < 0 ||
+			typeof parsed.id !== 'string' ||
+			!NOTE_ID_PATTERN.test(parsed.id)
+		) {
+			throw new Error('invalid cursor fields');
+		}
+		return { deletedAt: parsed.deletedAt as number, id: parsed.id.toLowerCase() };
+	} catch (error) {
+		if (error instanceof ApiError) throw error;
+		throw new ApiError(400, 'invalid_cursor', 'invalid notes cursor');
+	}
+}
+
 function getListLimit(value: string | null) {
 	if (value === null) return DEFAULT_LIST_LIMIT;
 	if (!/^\d{1,4}$/.test(value)) throw new ApiError(400, 'invalid_limit', 'limit must be an integer');
@@ -398,17 +428,19 @@ function getListLimit(value: string | null) {
 async function listNotes(env: AppEnv, vaultId: string, cursor: NoteCursor | null, limit: number) {
 	const statement = cursor
 		? env.DB.prepare(
-				`SELECT id, title, content, created_at, updated_at, updated_at AS revision
+				`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
 				 FROM notes
 				 WHERE vault_id = ?
+				   AND deleted_at IS NULL
 				   AND (updated_at < ? OR (updated_at = ? AND id < ?))
 				 ORDER BY updated_at DESC, id DESC
 				 LIMIT ?`
 			).bind(vaultId, cursor.updatedAt, cursor.updatedAt, cursor.id, limit + 1)
 		: env.DB.prepare(
-				`SELECT id, title, content, created_at, updated_at, updated_at AS revision
+				`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
 				 FROM notes
 				 WHERE vault_id = ?
+				   AND deleted_at IS NULL
 				 ORDER BY updated_at DESC, id DESC
 				 LIMIT ?`
 			).bind(vaultId, limit + 1);
@@ -419,15 +451,59 @@ async function listNotes(env: AppEnv, vaultId: string, cursor: NoteCursor | null
 	return { notes, nextCursor: hasMore && notes.length ? encodeNoteCursor(notes[notes.length - 1]) : null };
 }
 
+async function listTrashedNotes(env: AppEnv, vaultId: string, cursor: TrashCursor | null, limit: number) {
+	const statement = cursor
+		? env.DB.prepare(
+				`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
+				 FROM notes
+				 WHERE vault_id = ?
+				   AND deleted_at IS NOT NULL
+				   AND (deleted_at < ? OR (deleted_at = ? AND id < ?))
+				 ORDER BY deleted_at DESC, id DESC
+				 LIMIT ?`
+			).bind(vaultId, cursor.deletedAt, cursor.deletedAt, cursor.id, limit + 1)
+		: env.DB.prepare(
+				`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
+				 FROM notes
+				 WHERE vault_id = ? AND deleted_at IS NOT NULL
+				 ORDER BY deleted_at DESC, id DESC
+				 LIMIT ?`
+			).bind(vaultId, limit + 1);
+	const result = await statement.all<Note>();
+	const rows = result.results ?? [];
+	const hasMore = rows.length > limit;
+	const notes = hasMore ? rows.slice(0, limit) : rows;
+	return { notes, nextCursor: hasMore && notes.length ? encodeTrashCursor(notes[notes.length - 1]) : null };
+}
+
 async function getNote(env: AppEnv, id: string, vaultId: string) {
 	return env.DB.prepare(
-		`SELECT id, title, content, created_at, updated_at, updated_at AS revision
+		`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
 		 FROM notes
-		 WHERE id = ? AND vault_id = ?
+		 WHERE id = ? AND vault_id = ? AND deleted_at IS NULL
 		 LIMIT 1`
 	)
 		.bind(id, vaultId)
 		.first<Note>();
+}
+
+async function getTrashedNote(env: AppEnv, id: string, vaultId: string) {
+	return env.DB.prepare(
+		`SELECT id, title, content, created_at, updated_at, updated_at AS revision, deleted_at
+		 FROM notes
+		 WHERE id = ? AND vault_id = ? AND deleted_at IS NOT NULL
+		 LIMIT 1`
+	)
+		.bind(id, vaultId)
+		.first<Note>();
+}
+
+function requireRevisionHeader(request: Request) {
+	const revisionHeader = request.headers.get('if-match');
+	if (!revisionHeader || !/^\d+$/.test(revisionHeader) || Number(revisionHeader) < 1 || !Number.isSafeInteger(Number(revisionHeader))) {
+		throw new ApiError(428, 'revision_required', 'If-Match must contain the current positive revision');
+	}
+	return Number(revisionHeader);
 }
 
 async function createNoteShare(
@@ -915,9 +991,14 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 	}
 
 	if (url.pathname === '/api/notes' && request.method === 'GET') {
-		const cursor = decodeNoteCursor(url.searchParams.get('cursor'));
 		const limit = getListLimit(url.searchParams.get('limit'));
-		const result = await listNotes(env, vaultId, cursor, limit);
+		const trash = url.searchParams.get('trash');
+		if (trash !== null && trash !== '0' && trash !== '1') {
+			throw new ApiError(400, 'invalid_trash_filter', 'trash must be 0 or 1');
+		}
+		const result = trash === '1'
+			? await listTrashedNotes(env, vaultId, decodeTrashCursor(url.searchParams.get('cursor')), limit)
+			: await listNotes(env, vaultId, decodeNoteCursor(url.searchParams.get('cursor')), limit);
 		return json({ ok: true, notes: result.notes, nextCursor: result.nextCursor });
 	}
 
@@ -941,7 +1022,7 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 			 SELECT ?, ?, ?, ?, ?, ?
 			 WHERE 1 = 1 ${attachmentGuard}
 			 ON CONFLICT(id) DO NOTHING
-			 RETURNING id, title, content, created_at, updated_at, updated_at AS revision`
+			 RETURNING id, title, content, created_at, updated_at, updated_at AS revision, deleted_at`
 		)
 			.bind(
 				id, vaultId, title, content, now, now,
@@ -970,6 +1051,59 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 			return json({ ok: false, error: 'conflict', code: 'id_conflict' }, 409);
 		}
 		return json({ ok: true, note }, 201);
+	}
+
+	const restoreMatch = /^\/api\/notes\/([^/]+)\/restore$/.exec(url.pathname);
+	if (restoreMatch) {
+		if (request.method !== 'POST') return json({ ok: false, error: 'not_found' }, 404);
+		const id = requireNoteId(decodeURIComponent(restoreMatch[1]));
+		const revision = requireRevisionHeader(request);
+		const now = Date.now();
+		const note = await env.DB.prepare(
+			`UPDATE notes
+			 SET deleted_at = NULL,
+			     updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
+			 WHERE id = ? AND vault_id = ? AND deleted_at IS NOT NULL AND updated_at = ?
+			 RETURNING id, title, content, created_at, updated_at, updated_at AS revision, deleted_at`
+		)
+			.bind(now, now, id, vaultId, revision)
+			.first<Note>();
+		if (note) return json({ ok: true, note });
+		const existing = await getTrashedNote(env, id, vaultId);
+		if (!existing) return json({ ok: false, error: 'not_found' }, 404);
+		return json({ ok: false, error: 'revision_conflict', currentRevision: existing.revision }, 409);
+	}
+
+	const permanentMatch = /^\/api\/notes\/([^/]+)\/permanent$/.exec(url.pathname);
+	if (permanentMatch) {
+		if (request.method !== 'DELETE') return json({ ok: false, error: 'not_found' }, 404);
+		const id = requireNoteId(decodeURIComponent(permanentMatch[1]));
+		const revision = requireRevisionHeader(request);
+		const now = Date.now();
+		const deletionBatch = await env.DB.batch([
+			env.DB.prepare(
+				`UPDATE note_attachments
+				 SET status = 'detached', detached_at = ?
+				 WHERE vault_id = ? AND note_id = ? AND status IN ('pending', 'attached')
+				   AND EXISTS (
+				     SELECT 1 FROM notes
+				     WHERE id = ? AND vault_id = ? AND deleted_at IS NOT NULL AND updated_at = ?
+				   )`
+			).bind(now, vaultId, id, id, vaultId, revision),
+			env.DB.prepare(
+				`DELETE FROM notes
+				 WHERE id = ? AND vault_id = ? AND deleted_at IS NOT NULL AND updated_at = ?
+				 RETURNING id`
+			).bind(id, vaultId, revision),
+		]);
+		const deleted = (deletionBatch[1]?.results?.[0] as { id: string } | undefined) ?? null;
+		if (!deleted) {
+			const existing = await getTrashedNote(env, id, vaultId);
+			if (!existing) return json({ ok: false, error: 'not_found' }, 404);
+			return json({ ok: false, error: 'revision_conflict', currentRevision: existing.revision }, 409);
+		}
+		scheduleDetachedObjectDeletion(env, ctx, vaultId);
+		return json({ ok: true });
 	}
 
 	if (url.pathname.startsWith('/api/notes/')) {
@@ -1013,7 +1147,7 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 				     content = ?,
 				     updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
 				 WHERE id = ? AND vault_id = ? AND updated_at = ? ${attachmentGuard}
-				 RETURNING id, title, content, created_at, updated_at, updated_at AS revision`
+					RETURNING id, title, content, created_at, updated_at, updated_at AS revision, deleted_at`
 				).bind(
 					title, content, now, now, id, vaultId, body.revision,
 					...(attachmentIds.length > 0 ? [vaultId, id, ...attachmentIds, attachmentIds.length] : [])
@@ -1057,36 +1191,21 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		}
 
 		if (request.method === 'DELETE') {
-			const revisionHeader = request.headers.get('if-match');
-			if (!revisionHeader || !/^\d+$/.test(revisionHeader) || Number(revisionHeader) < 1) {
-				throw new ApiError(428, 'revision_required', 'If-Match must contain the current positive revision');
-			}
-			const revision = Number(revisionHeader);
-			if (!Number.isSafeInteger(revision)) {
-				throw new ApiError(428, 'revision_required', 'If-Match must contain the current positive revision');
-			}
-			const deletionBatch = await env.DB.batch([
-				env.DB.prepare(
-					`UPDATE note_attachments
-					 SET status = 'detached', detached_at = ?
-					 WHERE vault_id = ? AND note_id = ? AND status IN ('pending', 'attached')
-					   AND EXISTS (SELECT 1 FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ?)`
-				).bind(Date.now(), vaultId, id, id, vaultId, revision),
-				env.DB.prepare(
-					'DELETE FROM notes WHERE id = ? AND vault_id = ? AND updated_at = ? RETURNING id'
-				).bind(id, vaultId, revision),
-			]);
-			const deleted = (deletionBatch[1]?.results?.[0] as { id: string } | undefined) ?? null;
-			if (!deleted) {
-				const existing = await getNote(env, id, vaultId);
-				if (!existing) return json({ ok: false, error: 'not_found' }, 404);
-				return json(
-					{ ok: false, error: 'revision_conflict', currentRevision: existing.revision },
-					409
-				);
-			}
-			scheduleDetachedObjectDeletion(env, ctx, vaultId);
-			return json({ ok: true });
+			const revision = requireRevisionHeader(request);
+			const now = Date.now();
+			const note = await env.DB.prepare(
+				`UPDATE notes
+				 SET deleted_at = ?,
+				     updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
+				 WHERE id = ? AND vault_id = ? AND deleted_at IS NULL AND updated_at = ?
+				 RETURNING id, title, content, created_at, updated_at, updated_at AS revision, deleted_at`
+			)
+				.bind(now, now, now, id, vaultId, revision)
+				.first<Note>();
+			if (note) return json({ ok: true, note });
+			const existing = await getNote(env, id, vaultId);
+			if (!existing) return json({ ok: false, error: 'not_found' }, 404);
+			return json({ ok: false, error: 'revision_conflict', currentRevision: existing.revision }, 409);
 		}
 	}
 

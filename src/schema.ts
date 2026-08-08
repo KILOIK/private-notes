@@ -24,6 +24,7 @@ const APPLIED_MIGRATIONS = [
 	'0008_attachments.sql',
 	'0009_totp_sessions.sql',
 	'0010_note_folders.sql',
+	'0011_note_trash.sql',
 ] as const;
 
 const schemaChecks = new WeakMap<object, Promise<void>>();
@@ -66,13 +67,22 @@ async function initializeFreshDatabase(db: D1Database) {
 			 title TEXT NOT NULL,
 			 content TEXT NOT NULL,
 			 created_at INTEGER NOT NULL,
-			 updated_at INTEGER NOT NULL,
-			 vault_id TEXT NOT NULL DEFAULT 'default'
+				 updated_at INTEGER NOT NULL,
+				 vault_id TEXT NOT NULL DEFAULT 'default',
+				 deleted_at INTEGER
 			)`
 		),
 		db.prepare(
 			`CREATE INDEX IF NOT EXISTS idx_notes_vault_updated_id
 			 ON notes(vault_id, updated_at DESC, id DESC)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_notes_vault_deleted_updated_id
+			 ON notes(vault_id, deleted_at, updated_at DESC, id DESC)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_notes_vault_deleted_at_id
+			 ON notes(vault_id, deleted_at DESC, id DESC)`
 		),
 		db.prepare(
 			`CREATE TABLE IF NOT EXISTS app_meta (

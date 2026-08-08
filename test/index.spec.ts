@@ -567,6 +567,7 @@ describe('private-notes worker', () => {
 			'0008_attachments.sql',
 			'0009_totp_sessions.sql',
 			'0010_note_folders.sql',
+			'0011_note_trash.sql',
 		]);
 		const noteColumns = await env.DB.prepare('PRAGMA table_info(notes)').all<{ name: string }>();
 		expect((noteColumns.results ?? []).map((column) => column.name)).toEqual([
@@ -576,6 +577,7 @@ describe('private-notes worker', () => {
 			'created_at',
 			'updated_at',
 			'vault_id',
+			'deleted_at',
 		]);
 		const noteIndex = await env.DB.prepare('PRAGMA index_info(idx_notes_vault_updated_id)').all<{ name: string }>();
 		expect((noteIndex.results ?? []).map((column) => column.name)).toEqual(['vault_id', 'updated_at', 'id']);

@@ -87,7 +87,7 @@ export async function createAttachment(
 	request: Request
 ): Promise<AttachmentMetadata> {
 	const normalizedNoteId = normalizeUuid(noteId, 'noteId');
-	const note = await env.DB.prepare('SELECT id FROM notes WHERE id = ? AND vault_id = ? LIMIT 1')
+	const note = await env.DB.prepare('SELECT id FROM notes WHERE id = ? AND vault_id = ? AND deleted_at IS NULL LIMIT 1')
 		.bind(normalizedNoteId, vaultId)
 		.first<{ id: string }>();
 	if (!note && request.headers.get('x-note-draft') !== '1') {
