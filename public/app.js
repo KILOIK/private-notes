@@ -2683,9 +2683,18 @@ function handleEditorPaste(event) {
   }
 }
 
+/** @param {DragEvent} event */
+function isImageDragEvent(event) {
+  const items = Array.from(event.dataTransfer?.items || []);
+  if (items.some(function (item) { return item.kind === 'file' && item.type.startsWith('image/'); })) return true;
+  const files = Array.from(event.dataTransfer?.files || []);
+  return files.some(function (file) { return file.type.startsWith('image/'); });
+}
+
 els.editorCard.addEventListener('paste', handleEditorPaste);
 els.editorCard.addEventListener('dragover', function (event) {
   if (state.editorRecordType !== 'note') return;
+  if (!isImageDragEvent(event)) return;
   event.preventDefault();
   if (state.composerSaving) return;
   els.editorCard.classList.add('drag-over');
@@ -2693,6 +2702,7 @@ els.editorCard.addEventListener('dragover', function (event) {
 els.editorCard.addEventListener('dragleave', function () { els.editorCard.classList.remove('drag-over'); });
 els.editorCard.addEventListener('drop', function (event) {
   if (state.editorRecordType !== 'note') return;
+  if (!isImageDragEvent(event)) return;
   event.preventDefault();
   els.editorCard.classList.remove('drag-over');
   if (state.composerSaving) {

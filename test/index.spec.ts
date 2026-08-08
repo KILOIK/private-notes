@@ -308,6 +308,9 @@ describe('private-notes worker', () => {
 		expect(sourceBufferStart).toBeGreaterThanOrEqual(0);
 		expect(appScript.slice(sourceBufferStart, sourceBufferEnd)).toContain('state.editorSourceDirty = false;');
 		expect(appScript).toContain("els.editorCard.addEventListener('drop'");
+		expect(appScript).toContain('function isImageDragEvent(event)');
+		expect(appScript).toContain('if (!isImageDragEvent(event)) return;');
+		expect(baseStylesText).toContain('.is-document-composer .document-toolbar { position: static; }');
 		expect(appScript).toContain('function setSettingsBackgroundInert(inert)');
 		expect(appScript).toContain('[els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn]');
 		expect(appScript).toContain('setSettingsBackgroundInert(true);');
