@@ -73,6 +73,8 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorRecordType: 'note' | 'password'
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorFolderId: string | null
+ * editorSourceMarkdown: string
+ * editorSourceDirty: boolean
  * composerSaving: boolean
  * composerInitialSnapshot: string | null
  * composerPostSaveRecovery: { noteId: string, revision: number, attachmentIds: Set<string> } | null
@@ -132,6 +134,8 @@ const state = {
   editorRecordType: 'note',
   editorPasswordFields: [],
   editorFolderId: null,
+  editorSourceMarkdown: '',
+  editorSourceDirty: false,
   composerSaving: false,
   composerInitialSnapshot: null,
   composerPostSaveRecovery: null,
@@ -1559,9 +1563,19 @@ function getComposerSnapshot() {
     title: els.editorTitle.value,
     folderId: state.editorFolderId,
     fields: state.editorPasswordFields,
-    markdown: state.editorRecordType === 'password' ? '' : serializeEditorMarkdown(els.documentEditor),
+    markdown: state.editorRecordType === 'password' ? '' : getEditorSourceMarkdown(),
     pendingCount: state.attachmentDraft.images.length,
   });
+}
+
+function markEditorSourceDirty() {
+  state.editorSourceDirty = true;
+}
+
+function getEditorSourceMarkdown() {
+  if (!state.editorSourceDirty) return state.editorSourceMarkdown;
+  state.editorSourceMarkdown = serializeEditorMarkdown(els.documentEditor);
+  return state.editorSourceMarkdown;
 }
 
 /** @param {string} text */
@@ -1605,6 +1619,8 @@ function openComposer(note) {
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? String(note.title || record?.title || '') : '';
   const markdown = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
+  state.editorSourceMarkdown = markdown;
+  state.editorSourceDirty = false;
   els.editorContent.value = markdown;
   renderComposerFolderSelect();
   updateComposerRecordType(recordType);
@@ -1654,6 +1670,8 @@ function closeComposer(discardDraft = true) {
   state.composerPostSaveRecovery = null;
   state.editorPasswordFields = [];
   state.editorFolderId = null;
+  state.editorSourceMarkdown = '';
+  state.editorSourceDirty = false;
   state.composerInitialSnapshot = null;
   els.editorTitle.value = '';
   els.editorContent.value = '';
@@ -1837,6 +1855,7 @@ async function uploadPendingEditorImage(pending) {
   const id = String(response.attachment.id);
   pending.attachmentId = id;
   state.pendingAttachmentIds.push(id);
+  markEditorSourceDirty();
 }
 
 /** @param {Blob} image */
@@ -1864,6 +1883,7 @@ function queueEditorImage(image) {
   } else {
     els.documentEditor.append(imageElement);
   }
+  markEditorSourceDirty();
   setAttachmentStatus(`正在浏览器加密并上传 ${state.attachmentDraft.images.length} 张图片…`);
   const upload = uploadPendingEditorImage(pending);
   pending.uploadPromise = upload;
@@ -1894,7 +1914,7 @@ async function saveComposer() {
     if (image.error) throw image.error;
     return image.uploadPromise || Promise.resolve();
   }));
-  let markdown = password ? '' : serializeEditorMarkdown(els.documentEditor);
+  let markdown = password ? '' : getEditorSourceMarkdown();
   els.editorContent.value = markdown;
   if (!password) {
     for (const image of state.attachmentDraft.images) {
@@ -1955,6 +1975,8 @@ async function saveComposer() {
     throw new Error('服务器保存响应格式无效');
   }
   state.editingId = committedNoteId;
+  state.editorSourceMarkdown = markdown;
+  state.editorSourceDirty = false;
   state.composerPostSaveRecovery = state.composerPostSaveRecovery
     ? updateComposerSaveRecovery(state.composerPostSaveRecovery, { id: committedNoteId, revision: committedRevision }, attachmentIds)
     : createComposerSaveRecovery({
@@ -2624,12 +2646,14 @@ els.editorToolbar.querySelectorAll('[data-editor-command]').forEach(function (bu
   button.addEventListener('click', function () {
     const command = button.getAttribute('data-editor-command') || '';
     runEditorCommand(els.documentEditor, command);
+    markEditorSourceDirty();
     els.documentEditor.focus();
   });
 });
 els.insertLinkBtn.onclick = function () {
   const url = window.prompt('输入 https/http 链接');
   if (url && !runEditorCommand(els.documentEditor, 'link', url.trim())) setStatus('请输入有效的 http/https 链接');
+  if (url) markEditorSourceDirty();
   els.documentEditor.focus();
 };
 els.insertImageBtn.onclick = function () {
@@ -2637,6 +2661,7 @@ els.insertImageBtn.onclick = function () {
   setStatus('请直接在正文粘贴图片，或将图片拖入编辑区');
 };
 els.documentEditor.addEventListener('input', function () {
+  markEditorSourceDirty();
   if (els.documentEditor.textContent?.trim()) els.documentEditor.removeAttribute('data-empty');
 });
 

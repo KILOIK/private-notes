@@ -296,6 +296,9 @@ describe('private-notes worker', () => {
 
 		const appScriptResponse = await env.ASSETS.fetch(new Request(`${ORIGIN}/app.js`));
 		const appScript = await appScriptResponse.text();
+		expect(appScript).toContain('editorSourceMarkdown');
+		expect(appScript).toContain('editorSourceDirty');
+		expect(appScript).toContain('state.editorSourceDirty = false;');
 		expect(appScript).toContain('function setSettingsBackgroundInert(inert)');
 		expect(appScript).toContain('[els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn]');
 		expect(appScript).toContain('setSettingsBackgroundInert(true);');
