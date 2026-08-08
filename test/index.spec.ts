@@ -233,6 +233,14 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('id="navigationTotalCount"');
 		expect(appHtml).toContain('id="navigationUncategorizedCount"');
 		expect(appHtml).toContain('class="folder-section-head"');
+		const folderHeadingIndex = appHtml.indexOf('我的文件夹');
+		const folderNavStart = appHtml.indexOf('id="folderNav"');
+		const uncategorizedIndex = appHtml.indexOf('id="uncategorizedNav"');
+		const folderNavEnd = appHtml.indexOf('</nav>', folderNavStart);
+		expect(folderHeadingIndex).toBeLessThan(uncategorizedIndex);
+		expect(uncategorizedIndex).toBeGreaterThan(folderNavStart);
+		expect(uncategorizedIndex).toBeLessThan(folderNavEnd);
+		expect(appHtml).not.toContain('aria-label="未分类记录"');
 		expect(appHtml).not.toContain('复制全文');
 		expect(appHtml).toContain('id="readerCopyBtn"');
 		expect(appHtml).toContain('id="readerShareBtn"');

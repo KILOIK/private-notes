@@ -484,7 +484,7 @@ function renderFilterNav() {
 }
 
 function renderFolders() {
-  els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) { element.remove(); });
+  els.folderNav.querySelectorAll('[data-folder-id]:not([data-folder-id="__uncategorized__"])').forEach(function (element) { element.remove(); });
   const empty = els.folderNav.querySelector('.folder-empty');
   if (empty) empty.classList.toggle('hidden', state.folders.length > 0);
   state.folders.forEach(function (folder) {
@@ -520,6 +520,7 @@ function renderNavigationSummary() {
   });
   els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) {
     const item = /** @type {HTMLElement} */ (element);
+    if (item.dataset.folderId === '__uncategorized__') return;
     const count = item.querySelector('.nav-item-count');
     if (count) count.textContent = String(model.folderCounts[item.dataset.folderId || ''] || 0);
   });
@@ -1144,16 +1145,6 @@ els.folderNav.addEventListener('click', function (event) {
   }
   els.noteListScroll.scrollTop = 0;
 });
-els.uncategorizedNav.onclick = function () {
-  state.trashMode = false;
-  state.activeFolderId = null;
-  applySearch();
-  if (state.workspaceMode !== 'wide') {
-    closeNavigation(false);
-    els.navigationBtn.focus();
-  }
-  els.noteListScroll.scrollTop = 0;
-};
 els.newFolderBtn.onclick = openFolderDialog;
 els.trashNav.onclick = function () {
   if (state.editingInline) {
