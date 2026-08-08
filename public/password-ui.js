@@ -1,5 +1,6 @@
 import { addCustomField, copyFieldValue, removeCustomField, toggleSecretVisibility } from './password-fields.js';
 import { encodePasswordRecord } from './note-records.js';
+import { buildPasswordDisplayModel } from './workspace-model.js';
 
 const FIXED_FIELD_IDS = new Set(['name', 'username', 'password', 'url', 'notes']);
 
@@ -130,16 +131,19 @@ export function renderPasswordEditor(container, fields, onFieldsChange) {
  */
 export function renderPasswordReader(container, record, clipboard, onStatus) {
   container.replaceChildren();
-  record.fields.forEach(function (field) {
+  const displayFields = buildPasswordDisplayModel(record.fields);
+  displayFields.forEach(function (display) {
+    const field = record.fields.find(function (item) { return item.id === display.id; });
+    if (!field) return;
     const wrapper = document.createElement('div');
-    wrapper.className = 'password-field';
-    const label = document.createElement('label');
+    wrapper.className = 'password-field password-reader-field' + (display.multiline ? ' is-multiline' : '');
+    const label = document.createElement('span');
     label.className = 'password-field-label';
-    label.textContent = String(field.label || '字段');
+    label.textContent = display.label;
     wrapper.append(label);
 
     let input;
-    if (field.type === 'multiline') {
+    if (display.multiline) {
       input = document.createElement('textarea');
       input.className = 'textarea password-reader-value';
       input.rows = 3;
@@ -147,31 +151,38 @@ export function renderPasswordReader(container, record, clipboard, onStatus) {
     } else {
       input = document.createElement('input');
       input.className = 'input password-reader-value';
-      input.type = field.type === 'secret' ? 'password' : 'text';
+      input.type = display.hidden ? 'password' : 'text';
       input.readOnly = true;
     }
-    input.value = field.value;
-    input.setAttribute('aria-label', String(field.label || '字段'));
+    input.value = display.value;
+    input.setAttribute('aria-label', display.label);
     wrapper.append(input);
 
-    if (field.type === 'secret' && input instanceof HTMLInputElement) {
+    if (display.hidden && input instanceof HTMLInputElement) {
       const visibility = document.createElement('button');
       visibility.type = 'button';
-      visibility.className = 'btn secondary password-field-action';
-      visibility.textContent = '显示';
+      visibility.className = 'icon-btn password-field-action';
+      visibility.textContent = '◉';
+      visibility.setAttribute('aria-label', '显示密码');
+      visibility.setAttribute('title', '显示密码');
       visibility.onclick = function () {
         toggleSecretVisibility(input);
-        visibility.textContent = input.type === 'password' ? '显示' : '隐藏';
+        const hidden = input.type === 'password';
+        visibility.textContent = hidden ? '◉' : '◌';
+        visibility.setAttribute('aria-label', hidden ? '显示密码' : '隐藏密码');
+        visibility.setAttribute('title', hidden ? '显示密码' : '隐藏密码');
       };
       wrapper.append(visibility);
     }
 
     const copy = document.createElement('button');
     copy.type = 'button';
-    copy.className = 'btn secondary per-field-copy';
-    copy.textContent = '复制';
+    copy.className = 'icon-btn password-field-copy';
+    copy.textContent = '⧉';
+    copy.setAttribute('aria-label', '复制' + display.label);
+    copy.setAttribute('title', '复制');
     copy.onclick = function () {
-      copyFieldValue(field.value, clipboard)
+      copyFieldValue(display.value, clipboard)
         .then(function () { onStatus('字段已复制'); })
         .catch(function () { onStatus('复制失败，请检查剪贴板权限'); });
     };

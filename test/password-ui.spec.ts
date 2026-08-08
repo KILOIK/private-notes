@@ -135,9 +135,11 @@ describe('password editor and reader behavior', () => {
 
 			renderPasswordReader(container, { type: 'password', fields }, clipboard, status);
 			const controls = descendants(container);
+			expect(controls.filter((element) => element.className.includes('password-reader-field'))).toHaveLength(5);
 			const secret = controls.find((element) => element.type === 'password');
 			expect(secret?.value).toBe('not-logged-secret');
-			const copy = controls.filter((element) => element.textContent === '复制')[2];
+			const copy = controls.filter((element) => element.className.includes('password-field-copy'))[2];
+			expect(copy?.textContent).toBe('⧉');
 			expect(copy?.onclick).toBeTypeOf('function');
 			copy?.onclick?.();
 			await vi.waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith('not-logged-secret'));
