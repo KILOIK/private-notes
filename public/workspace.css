@@ -1000,6 +1000,47 @@ a:focus-visible {
     font-size: 26px;
   }
 
+  .workspace-reader,
+  .reader-document,
+  .password-fields,
+  .password-reader-field {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .password-reader-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 14px 0;
+  }
+
+  .password-reader-field .password-field-label {
+    grid-column: 1;
+    grid-row: auto;
+    white-space: normal;
+  }
+
+  .password-reader-field .password-reader-value {
+    grid-column: 1;
+    grid-row: auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .password-reader-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .password-reader-field.is-multiline .password-reader-value {
+    width: 100%;
+    min-height: 88px;
+  }
+
   .more-menu {
     right: 8px;
   }

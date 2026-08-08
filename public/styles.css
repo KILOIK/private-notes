@@ -837,6 +837,16 @@ button, input, textarea { font: inherit; }
   width: fit-content;
   margin-top: 2px;
 }
+.password-reader-field,
+.password-reader-value,
+.password-reader-actions {
+  min-width: 0;
+  max-width: 100%;
+}
+.password-reader-value {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .password-custom-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createDefaultPasswordFields } from '../public/password-fields.js';
 import { decodeNoteRecord } from '../public/note-records.js';
 import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from '../public/password-ui.js';
@@ -64,6 +65,14 @@ function descendants(root: TestElement): TestElement[] {
 }
 
 describe('password editor and reader behavior', () => {
+	it('defines a mobile reader layout with a full-width multiline value and separate actions', () => {
+		const styles = readFileSync(new URL('../public/workspace.css', import.meta.url), 'utf8');
+		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/);
+		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-value\s*\{[\s\S]*?grid-column:\s*1;[\s\S]*?width:\s*100%;/);
+		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-actions\s*\{[\s\S]*?grid-column:\s*1;/);
+		expect(styles).toMatch(/\.password-reader-field \.password-field-action,[\s\S]*?min-width:\s*44px;/);
+	});
+
 	it('focuses the independent title for both note and password records', () => {
 		const title = new TestElement();
 		const passwordFields = new TestElement();
