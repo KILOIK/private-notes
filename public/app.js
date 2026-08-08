@@ -282,7 +282,6 @@ const els = {
   editorToolbar: getElement('editorToolbar'),
   insertLinkBtn: getButton('insertLinkBtn'),
   insertImageBtn: getButton('insertImageBtn'),
-  attachmentDropZone: getElement('attachmentDropZone'),
   attachmentStatus: getElement('attachmentStatus'),
   mobilePasteStatus: getElement('mobilePasteStatus'),
   editorPreview: getElement('editorPreview'),
@@ -1544,7 +1543,6 @@ function updateComposerRecordType(recordType) {
   els.documentEditor.classList.toggle('hidden', password);
   els.editorPreview.classList.add('hidden');
   els.editorToolbar.classList.toggle('hidden', password);
-  els.attachmentDropZone.classList.toggle('hidden', password);
   els.attachmentStatus.classList.toggle('hidden', password);
   els.mobilePasteStatus.classList.toggle('hidden', password);
   if (password) renderPasswordEditorFields();
@@ -2684,18 +2682,18 @@ function handleEditorPaste(event) {
   }
 }
 
-els.documentEditor.addEventListener('paste', handleEditorPaste);
 els.editorCard.addEventListener('paste', handleEditorPaste);
-els.attachmentDropZone.addEventListener('paste', handleEditorPaste);
-els.attachmentDropZone.addEventListener('dragover', function (event) {
+els.editorCard.addEventListener('dragover', function (event) {
+  if (state.editorRecordType !== 'note') return;
   event.preventDefault();
   if (state.composerSaving) return;
-  els.attachmentDropZone.classList.add('drag-over');
+  els.editorCard.classList.add('drag-over');
 });
-els.attachmentDropZone.addEventListener('dragleave', function () { els.attachmentDropZone.classList.remove('drag-over'); });
-els.attachmentDropZone.addEventListener('drop', function (event) {
+els.editorCard.addEventListener('dragleave', function () { els.editorCard.classList.remove('drag-over'); });
+els.editorCard.addEventListener('drop', function (event) {
+  if (state.editorRecordType !== 'note') return;
   event.preventDefault();
-  els.attachmentDropZone.classList.remove('drag-over');
+  els.editorCard.classList.remove('drag-over');
   if (state.composerSaving) {
     setAttachmentStatus('正在保存，请稍候');
     return;

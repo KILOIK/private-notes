@@ -209,6 +209,10 @@ describe('private-notes worker', () => {
 		expect(response.headers.get('content-type')).toContain('text/html');
 		const appHtml = await response.text();
 		expect(appHtml).toContain('Private Notes');
+		expect(appHtml).toContain('class="composer-title-input"');
+		expect(appHtml).toContain('class="composer-folder-action"');
+		expect(appHtml).not.toContain('记录会在此设备加密后保存，正文支持在线文档式编辑。');
+		expect(appHtml).not.toContain('将图片粘贴或拖到这里，图片会先在浏览器加密');
 		expect(appHtml).toContain('editorToolbar');
 		expect(appHtml).toContain('totpView');
 		expect(appHtml).toContain('settingsBtn');
@@ -299,6 +303,7 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('editorSourceMarkdown');
 		expect(appScript).toContain('editorSourceDirty');
 		expect(appScript).toContain('state.editorSourceDirty = false;');
+		expect(appScript).toContain("els.editorCard.addEventListener('drop'");
 		expect(appScript).toContain('function setSettingsBackgroundInert(inert)');
 		expect(appScript).toContain('[els.topbar, els.statusLine, els.vaultPanel, els.workspaceLayout, els.fabNewBtn, els.fabTopBtn]');
 		expect(appScript).toContain('setSettingsBackgroundInert(true);');
