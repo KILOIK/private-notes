@@ -119,7 +119,7 @@ const state = {
   folders: [],
   folderMap: new Map(),
   activeCategory: 'all',
-  activeFolderId: undefined,
+  activeFolderId: null,
   sortKey: 'updated',
   editorRecordType: 'note',
   editorPasswordFields: [],
@@ -275,11 +275,7 @@ const els = {
   cancelShareBtn: getButton('cancelShareBtn'),
   createShareBtn: getButton('createShareBtn'),
   copyShareLinkBtn: getButton('copyShareLinkBtn'),
-  categoryNav: getElement('categoryNav'),
-  uncategorizedNav: getButton('uncategorizedNav'),
   folderNav: getElement('folderNav'),
-  navigationTotalCount: getElement('navigationTotalCount'),
-  navigationUncategorizedCount: getElement('navigationUncategorizedCount'),
   trashNav: getButton('trashNav'),
   trashNavCount: getElement('trashNavCount'),
   newFolderBtn: getButton('newFolderBtn'),
@@ -467,71 +463,77 @@ function closeFolderDialog() {
 }
 
 function renderFilterNav() {
-  els.categoryNav.querySelectorAll('[data-category]').forEach(function (element) {
+  els.folderNav.querySelectorAll('[data-folder-id][data-folder-category]').forEach(function (element) {
     const button = /** @type {HTMLButtonElement} */ (element);
-    const active = button.dataset.category === state.activeCategory;
+    const folderId = button.dataset.folderId === '__uncategorized__' ? null : button.dataset.folderId;
+    const active = folderId === state.activeFolderId && button.dataset.folderCategory === state.activeCategory;
     button.classList.toggle('is-active', active);
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  const uncategorizedActive = state.activeFolderId === null;
-  els.uncategorizedNav.classList.toggle('is-active', uncategorizedActive);
-  if (uncategorizedActive) els.uncategorizedNav.setAttribute('aria-current', 'page');
-  else els.uncategorizedNav.removeAttribute('aria-current');
-  els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) {
-    const button = /** @type {HTMLButtonElement} */ (element);
-    const id = button.dataset.folderId || '';
-    const active = id !== '' && id !== '__uncategorized__' && id === state.activeFolderId;
-    button.classList.toggle('is-active', active);
-    if (active) button.setAttribute('aria-current', 'page');
-    else button.removeAttribute('aria-current');
+  els.folderNav.querySelectorAll('.folder-subfilters').forEach(function (element) {
+    const children = /** @type {HTMLElement} */ (element);
+    children.hidden = children.dataset.folderId !== (state.activeFolderId === null ? '__uncategorized__' : state.activeFolderId);
   });
   els.trashNav.classList.toggle('is-active', state.trashMode);
   if (state.trashMode) els.trashNav.setAttribute('aria-current', 'page');
   else els.trashNav.removeAttribute('aria-current');
 }
 
-function renderFolders() {
-  els.folderNav.querySelectorAll('[data-folder-id]:not([data-folder-id="__uncategorized__"])').forEach(function (element) { element.remove(); });
-  const empty = els.folderNav.querySelector('.folder-empty');
-  if (empty) empty.classList.toggle('hidden', state.folders.length > 0);
+/** @param {HTMLElement} container @param {string | null} folderId @param {{ total: number, note: number, password: number }} counts */
+function appendFolderFilters(container, folderId, counts) {
+  const children = document.createElement('div');
+  children.className = 'folder-subfilters';
+  children.dataset.folderId = folderId === null ? '__uncategorized__' : folderId;
+  children.hidden = state.activeFolderId !== folderId;
+  ['note', 'password'].forEach(function (category) {
+    const child = document.createElement('button');
+    child.type = 'button';
+    child.className = 'folder-subfilter';
+    child.dataset.folderId = folderId === null ? '__uncategorized__' : folderId;
+    child.dataset.folderCategory = category;
+    child.textContent = `${category === 'note' ? '笔记' : '密码'} ${category === 'note' ? counts.note : counts.password}`;
+    children.append(child);
+  });
+  container.append(children);
+}
+
+/** @param {string | null} folderId @param {string} name @param {{ total: number, note: number, password: number }} counts */
+function appendFolderFilter(folderId, name, counts) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'folder-chip';
+  button.dataset.folderId = folderId === null ? '__uncategorized__' : folderId;
+  button.dataset.folderCategory = 'all';
+  const icon = document.createElement('span');
+  icon.className = 'nav-item-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = folderId === null ? '?' : '▰';
+  const label = document.createElement('span');
+  label.className = 'nav-item-label';
+  label.textContent = name;
+  const count = document.createElement('span');
+  count.className = 'nav-item-count';
+  count.textContent = String(counts.total);
+  button.append(icon, label, count);
+  els.folderNav.append(button);
+  appendFolderFilters(els.folderNav, folderId, counts);
+}
+
+/** @param {ReturnType<typeof buildNavigationModel>} [model] */
+function renderFolders(model = buildNavigationModel(state.allNotes, state.folders, state.activeCategory, state.activeFolderId, state.trashCount)) {
+  els.folderNav.replaceChildren();
+  appendFolderFilter(null, '未分类', model.uncategorizedCounts);
   state.folders.forEach(function (folder) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'folder-chip';
-    button.dataset.folderId = folder.id;
-    const icon = document.createElement('span');
-    icon.className = 'nav-item-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = '▰';
-    const label = document.createElement('span');
-    label.className = 'nav-item-label';
-    label.textContent = folder.name;
-    const count = document.createElement('span');
-    count.className = 'nav-item-count';
-    count.textContent = '0';
-    button.append(icon, label, count);
-    els.folderNav.appendChild(button);
+    appendFolderFilter(folder.id, folder.name, model.folderCounts[folder.id]);
   });
   renderFilterNav();
 }
 
 function renderNavigationSummary() {
   const model = buildNavigationModel(state.allNotes, state.folders, state.activeCategory, state.activeFolderId, state.trashCount);
-  els.navigationTotalCount.textContent = String(model.totalCount);
-  els.navigationUncategorizedCount.textContent = String(model.uncategorizedCount);
   els.trashNavCount.textContent = String(model.trashCount);
-  els.categoryNav.querySelectorAll('[data-category-count]').forEach(function (element) {
-    const item = /** @type {HTMLElement} */ (element);
-    const key = item.dataset.categoryCount;
-    if (key === 'note' || key === 'password') item.textContent = String(model.categoryCounts[key]);
-  });
-  els.folderNav.querySelectorAll('[data-folder-id]').forEach(function (element) {
-    const item = /** @type {HTMLElement} */ (element);
-    if (item.dataset.folderId === '__uncategorized__') return;
-    const count = item.querySelector('.nav-item-count');
-    if (count) count.textContent = String(model.folderCounts[item.dataset.folderId || ''] || 0);
-  });
+  renderFolders(model);
 }
 
 function renderFolderManager() {
@@ -1123,27 +1125,15 @@ els.settingsLogoutBtn.onclick = function () {
   });
 };
 
-els.categoryNav.addEventListener('click', function (event) {
-  const target = event.target instanceof HTMLElement ? event.target.closest('[data-category]') : null;
-  if (!(target instanceof HTMLButtonElement)) return;
-  const category = target.dataset.category;
-  if (category !== 'all' && category !== 'note' && category !== 'password') return;
-  state.trashMode = false;
-  state.activeCategory = category;
-  applySearch();
-  if (state.workspaceMode !== 'wide') {
-    closeNavigation(false);
-    els.navigationBtn.focus();
-  }
-  els.noteListScroll.scrollTop = 0;
-});
-
 els.folderNav.addEventListener('click', function (event) {
-  const target = event.target instanceof HTMLElement ? event.target.closest('[data-folder-id]') : null;
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-folder-id][data-folder-category]') : null;
   if (!(target instanceof HTMLButtonElement)) return;
-  const folderId = target.dataset.folderId || '';
+  const folderId = target.dataset.folderId;
+  const category = target.dataset.folderCategory;
+  if (!folderId || (category !== 'all' && category !== 'note' && category !== 'password')) return;
   state.trashMode = false;
-  state.activeFolderId = folderId === '' ? undefined : folderId === '__uncategorized__' ? null : folderId;
+  state.activeFolderId = folderId === '__uncategorized__' ? null : folderId;
+  state.activeCategory = category;
   applySearch();
   if (state.workspaceMode !== 'wide') {
     closeNavigation(false);
@@ -1263,7 +1253,9 @@ async function fetchRawNotes(trash = false) {
 
 function renderList() {
   els.noteList.innerHTML = '';
-  els.listTitle.textContent = state.trashMode ? '最近删除' : state.activeCategory === 'password' ? '密码' : state.activeCategory === 'note' ? '笔记' : '全部笔记';
+  const folderName = typeof state.activeFolderId === 'string' ? state.folderMap.get(state.activeFolderId)?.name || '未分类' : '未分类';
+  const categoryLabel = state.activeCategory === 'note' ? ' · 笔记' : state.activeCategory === 'password' ? ' · 密码' : '';
+  els.listTitle.textContent = state.trashMode ? '最近删除' : folderName + categoryLabel;
   els.noteCount.textContent = state.notes.length ? ('共 ' + state.notes.length + ' 条') : '0 条';
   if (!state.trashMode && state.decryptFailedCount > 0) {
     els.noteCount.textContent += ' · ' + state.decryptFailedCount + ' 条无法解密';

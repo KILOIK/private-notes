@@ -22,30 +22,34 @@ export function getSortOptions() {
  */
 export function buildNavigationModel(notes, folders, activeCategory, activeFolderId, trashCount) {
   const categoryCounts = { all: notes.length, note: 0, password: 0 };
-  const folderCounts = Object.fromEntries(folders.map(function (folder) { return [folder.id, 0]; }));
-  let uncategorizedCount = 0;
+  const folderCounts = Object.fromEntries(folders.map(function (folder) {
+    return [folder.id, { total: 0, note: 0, password: 0 }];
+  }));
+  const uncategorizedCounts = { total: 0, note: 0, password: 0 };
 
   notes.forEach(function (note) {
     const type = note.record?.type === 'password' ? 'password' : 'note';
     categoryCounts[type] += 1;
     const folderId = typeof note.record?.folderId === 'string' ? note.record.folderId : null;
-    if (folderId && Object.prototype.hasOwnProperty.call(folderCounts, folderId)) folderCounts[folderId] += 1;
-    else uncategorizedCount += 1;
+    const counts = folderId && Object.prototype.hasOwnProperty.call(folderCounts, folderId)
+      ? folderCounts[folderId]
+      : uncategorizedCounts;
+    counts.total += 1;
+    counts[type] += 1;
   });
 
-  const activeKey = activeFolderId === undefined
-    ? 'all'
-    : activeFolderId === null
-      ? 'uncategorized'
-      : `folder:${activeFolderId}`;
+  const scope = activeFolderId === null ? 'uncategorized' : `folder:${activeFolderId}`;
+  const activeKey = `${scope}:${activeCategory}`;
+
+  Object.values(folderCounts).forEach(function (counts) { Object.freeze(counts); });
 
   return Object.freeze({
     totalCount: notes.length,
-    uncategorizedCount,
+    uncategorizedCounts: Object.freeze(uncategorizedCounts),
     categoryCounts: Object.freeze(categoryCounts),
     folderCounts: Object.freeze(folderCounts),
     trashCount: Math.max(0, Number.isFinite(trashCount) ? Math.floor(trashCount) : 0),
-    activeKey: activeCategory === 'all' ? activeKey : `category:${activeCategory}:${activeKey}`,
+    activeKey,
   });
 }
 

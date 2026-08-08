@@ -114,17 +114,8 @@
           <aside id="workspaceNavigation" class="workspace-navigation" aria-label="分类和文件夹" tabindex="-1">
             <div class="navigation-head"><strong>资料库</strong><button id="closeNavigationBtn" class="icon-btn navigation-close" type="button" aria-label="关闭分类和文件夹">×</button></div>
             <div class="navigation-scroll">
-              <div class="navigation-label">资料库</div>
-              <nav id="categoryNav" class="category-nav" aria-label="笔记分类">
-                <button class="category-tab is-active" type="button" data-category="all" aria-current="page"><span class="nav-item-icon" aria-hidden="true">▤</span><span class="nav-item-label">全部</span><span id="navigationTotalCount" class="nav-item-count">0</span></button>
-                <button class="category-tab" type="button" data-category="note"><span class="nav-item-icon" aria-hidden="true">N</span><span class="nav-item-label">笔记</span><span class="nav-item-count" data-category-count="note">0</span></button>
-                <button class="category-tab" type="button" data-category="password"><span class="nav-item-icon" aria-hidden="true">▣</span><span class="nav-item-label">密码</span><span class="nav-item-count" data-category-count="password">0</span></button>
-              </nav>
               <div class="folder-section-head"><div class="navigation-label">我的文件夹</div><button id="newFolderBtn" class="icon-btn folder-add-btn" type="button" aria-label="新建文件夹">＋</button></div>
-              <nav id="folderNav" class="folder-nav" aria-label="笔记文件夹">
-                <button id="uncategorizedNav" class="folder-chip folder-chip-system" type="button" data-folder-id="__uncategorized__"><span class="nav-item-icon" aria-hidden="true">?</span><span class="nav-item-label">未分类</span><span id="navigationUncategorizedCount" class="nav-item-count">0</span></button>
-                <span class="folder-empty hidden">还没有自定义文件夹</span>
-              </nav>
+              <nav id="folderNav" class="folder-nav" aria-label="笔记文件夹"></nav>
               <button id="manageFoldersBtn" class="navigation-command navigation-manage" type="button">管理文件夹</button>
             </div>
             <button id="trashNav" class="navigation-command" type="button"><span class="nav-item-icon" aria-hidden="true">▣</span><span class="nav-item-label">最近删除</span><span id="trashNavCount" class="nav-item-count">0</span></button>

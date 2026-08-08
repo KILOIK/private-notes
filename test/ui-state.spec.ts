@@ -51,7 +51,7 @@ describe('sensitive UI state', () => {
 		expect(state.folders).toEqual([]);
 		expect(state.folderMap.size).toBe(0);
 		expect(state.activeCategory).toBe('all');
-		expect(state.activeFolderId).toBeUndefined();
+		expect(state.activeFolderId).toBeNull();
 	});
 
 	it('replaces decrypted composer folder options with the uncategorized fallback during vault cleanup', () => {

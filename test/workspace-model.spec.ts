@@ -13,14 +13,17 @@ const notes = [
 ];
 
 describe('PDF workspace model', () => {
-	it('builds navigation counts and grouped entries', () => {
-		const model = buildNavigationModel(notes, folders, 'all', undefined, 2);
+	it('groups total, note, and password counts under every folder', () => {
+		const model = buildNavigationModel(notes, folders, 'password', 'work', 2);
 		expect(model.totalCount).toBe(3);
-		expect(model.uncategorizedCount).toBe(2);
+		expect(model.uncategorizedCounts).toEqual({ total: 2, note: 1, password: 1 });
 		expect(model.categoryCounts).toEqual({ all: 3, note: 2, password: 1 });
-		expect(model.folderCounts).toEqual({ work: 1, life: 0 });
+		expect(model.folderCounts).toEqual({
+			work: { total: 1, note: 1, password: 0 },
+			life: { total: 0, note: 0, password: 0 },
+		});
 		expect(model.trashCount).toBe(2);
-		expect(model.activeKey).toBe('all');
+		expect(model.activeKey).toBe('folder:work:password');
 	});
 
 	it('sorts visible notes without mutating input', () => {

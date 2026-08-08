@@ -242,16 +242,10 @@ describe('private-notes worker', () => {
 			'trashNav', 'readerRestoreBtn', 'readerPermanentDeleteBtn', 'newFolderBtn', 'sortBtn', 'feedNewBtn'];
 		for (const id of requiredIds) expect(appHtml).toContain(`id="${id}"`);
 		expect(appHtml).toContain('id="sortMenu"');
-		expect(appHtml).toContain('id="navigationTotalCount"');
-		expect(appHtml).toContain('id="navigationUncategorizedCount"');
+		expect(appHtml).not.toContain('id="categoryNav"');
+		expect(appHtml).not.toContain('id="navigationTotalCount"');
+		expect(appHtml).toContain('id="folderNav"');
 		expect(appHtml).toContain('class="folder-section-head"');
-		const folderHeadingIndex = appHtml.indexOf('我的文件夹');
-		const folderNavStart = appHtml.indexOf('id="folderNav"');
-		const uncategorizedIndex = appHtml.indexOf('id="uncategorizedNav"');
-		const folderNavEnd = appHtml.indexOf('</nav>', folderNavStart);
-		expect(folderHeadingIndex).toBeLessThan(uncategorizedIndex);
-		expect(uncategorizedIndex).toBeGreaterThan(folderNavStart);
-		expect(uncategorizedIndex).toBeLessThan(folderNavEnd);
 		expect(appHtml).not.toContain('aria-label="未分类记录"');
 		expect(appHtml).not.toContain('复制全文');
 		expect(appHtml).toContain('id="readerCopyBtn"');
@@ -287,6 +281,9 @@ describe('private-notes worker', () => {
 		expect(appScript).not.toContain('els.appView.inert = true;');
 		expect(appScript).toContain("from './workspace-view.js'");
 		expect(appScript).toContain('function syncWorkspacePresentation()');
+		expect(appScript).toContain('data-folder-category');
+		expect(appScript).toContain("state.activeFolderId = folderId === '__uncategorized__' ? null : folderId;");
+		expect(appScript).toContain('activeFolderId: null');
 
 		const sharePage = await env.ASSETS.fetch(new Request(`${ORIGIN}/share`));
 		expect(sharePage.status).toBe(200);

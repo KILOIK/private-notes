@@ -41,7 +41,7 @@ export function clearDecryptedFolderState(state, editorFolder) {
   state.folders = [];
   state.folderMap = new Map();
   state.activeCategory = 'all';
-  state.activeFolderId = undefined;
+  state.activeFolderId = null;
   if (editorFolder) {
     const fallback = editorFolder.ownerDocument.createElement('option');
     fallback.value = '';
