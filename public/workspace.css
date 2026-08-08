@@ -487,8 +487,15 @@
   gap: 6px;
 }
 
-.reader-actions .btn {
-  min-height: 36px;
+.reader-action-btn {
+  color: #475569;
+  font-size: 18px;
+}
+
+.reader-action-btn:hover,
+.reader-action-btn:focus-visible {
+  background: #f0fdf4;
+  color: #166534;
 }
 
 .reader-document {
@@ -839,7 +846,7 @@ a:focus-visible {
     gap: 2px;
   }
 
-  .reader-actions .btn {
+  .reader-action-btn {
     min-width: 40px;
     min-height: 40px;
     padding: 0 6px;

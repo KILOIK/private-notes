@@ -234,6 +234,9 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('id="readerCopyBtn"');
 		expect(appHtml).toContain('id="readerShareBtn"');
 		expect(appHtml).toContain('id="readerEditBtn"');
+		expect(appHtml).toContain('aria-label="复制笔记"');
+		expect(appHtml).toContain('aria-label="分享笔记"');
+		expect(appHtml).toContain('aria-label="编辑笔记"');
 		expect(appHtml.indexOf('id="readerDeleteBtn"')).toBeGreaterThan(appHtml.indexOf('id="readerMoreMenu"'));
 		expect(appHtml).toContain('<link rel="stylesheet" href="/workspace.css" />');
 		expect(appHtml).not.toContain('class="card workspace-sidebar"');
