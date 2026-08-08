@@ -1,29 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { setComposerSaving } from '../public/composer-saving.js';
+import { beginComposerSaving } from '../public/composer-saving.js';
 
 describe('composer saving state', () => {
-	it('disables save, cancel, and close while marking the dialog busy', () => {
-		const state = { composerSaving: false };
+	it('releases the original inline host after editor mode changes', () => {
+		const state = { composerSaving: false, editingInline: true };
 		const saveButton = { disabled: false };
 		const cancelButton = { disabled: false };
-		const closeButton = { disabled: false };
 		const attributes = new Map<string, string>();
-		const modal = {
+		const host = {
 			inert: false,
 			setAttribute(name: string, value: string) { attributes.set(name, value); },
 			removeAttribute(name: string) { attributes.delete(name); },
 		};
 
-		setComposerSaving(state, { saveButton, cancelButton, closeButton, modal }, true);
+		const release = beginComposerSaving(state, { saveButton, cancelButton, host });
 		expect(state.composerSaving).toBe(true);
-		expect([saveButton.disabled, cancelButton.disabled, closeButton.disabled]).toEqual([true, true, true]);
-		expect(modal.inert).toBe(true);
+		expect([saveButton.disabled, cancelButton.disabled]).toEqual([true, true]);
+		expect(host.inert).toBe(true);
 		expect(attributes.get('aria-busy')).toBe('true');
 
-		setComposerSaving(state, { saveButton, cancelButton, closeButton, modal }, false);
+		state.editingInline = false;
+		release();
 		expect(state.composerSaving).toBe(false);
-		expect([saveButton.disabled, cancelButton.disabled, closeButton.disabled]).toEqual([false, false, false]);
-		expect(modal.inert).toBe(false);
+		expect([saveButton.disabled, cancelButton.disabled]).toEqual([false, false]);
+		expect(host.inert).toBe(false);
 		expect(attributes.has('aria-busy')).toBe(false);
 	});
 });

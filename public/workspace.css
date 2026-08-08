@@ -538,6 +538,13 @@
   padding-right: 48px;
 }
 
+.reader-editor-card .composer-action-bar {
+  margin-left: -48px;
+  margin-right: -48px;
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
 .reader-editor-card .textarea {
   min-height: min(56dvh, 640px);
 }
@@ -1027,6 +1034,20 @@ a:focus-visible {
   .reader-editor-card .document-toolbar {
     margin-left: -16px;
     margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .reader-editor-card .composer-action-bar {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .composer-action-bar {
+    margin-left: -14px;
+    margin-right: -14px;
     padding-left: 16px;
     padding-right: 16px;
   }

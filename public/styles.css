@@ -399,6 +399,36 @@ button, input, textarea { font: inherit; }
   align-items: center;
   margin-bottom: 16px;
 }
+.composer-action-bar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  margin: 0 -22px 14px;
+  padding: 6px 22px;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.98);
+}
+.composer-save-status {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #64748b;
+  font-size: 12px;
+}
+.composer-action-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.composer-action-buttons .btn {
+  min-height: 44px;
+  height: 44px;
+}
 .modal-actions {
   display: flex;
   gap: 10px;
@@ -824,18 +854,18 @@ button, input, textarea { font: inherit; }
   flex-direction: column;
 }
 .is-document-composer .modal-head { order: 0; }
-.is-document-composer .document-toolbar { order: 1; }
-.is-document-composer #editorTitle { order: 2; }
-.is-document-composer .composer-folder-label { order: 3; }
-.is-document-composer .composer-folder-select { order: 4; }
-.is-document-composer .attachment-drop-zone { order: 5; }
-.is-document-composer .attachment-status { order: 6; }
-.is-document-composer #mobilePasteStatus { order: 7; }
-.is-document-composer .document-editor { order: 8; }
-.is-document-composer .modal-actions { order: 9; }
+.is-document-composer .composer-action-bar { order: 1; }
+.is-document-composer .document-toolbar { order: 2; }
+.is-document-composer #editorTitle { order: 3; }
+.is-document-composer .composer-folder-label { order: 4; }
+.is-document-composer .composer-folder-select { order: 5; }
+.is-document-composer .attachment-drop-zone { order: 6; }
+.is-document-composer .attachment-status { order: 7; }
+.is-document-composer #mobilePasteStatus { order: 8; }
+.is-document-composer .document-editor { order: 9; }
 .document-toolbar {
   position: sticky;
-  top: 0;
+  top: 56px;
   z-index: 2;
   flex-wrap: nowrap;
   min-height: 52px;

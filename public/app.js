@@ -9,7 +9,8 @@ import { createDefaultPasswordFields } from './password-fields.js';
 import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
 import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
-import { setComposerSaving } from './composer-saving.js';
+import { beginComposerSaving } from './composer-saving.js';
+import { createComposerDraftSnapshot } from './composer-draft.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
@@ -66,6 +67,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorFolderId: string | null
  * composerSaving: boolean
+ * composerInitialSnapshot: string | null
  * editingInline: boolean
  * workspaceMode: 'wide' | 'compact' | 'mobile'
  * navigationOpen: boolean
@@ -120,6 +122,7 @@ const state = {
   editorPasswordFields: [],
   editorFolderId: null,
   composerSaving: false,
+  composerInitialSnapshot: null,
   editingInline: false,
   workspaceMode: getWorkspaceMode(window.innerWidth),
   navigationOpen: false,
@@ -254,7 +257,7 @@ const els = {
   attachmentStatus: getElement('attachmentStatus'),
   mobilePasteStatus: getElement('mobilePasteStatus'),
   editorPreview: getElement('editorPreview'),
-  closeModalBtn: getButton('closeModalBtn'),
+  composerSaveStatus: getElement('composerSaveStatus'),
   cancelBtn: getButton('cancelBtn'),
   saveBtn: getButton('saveBtn'),
   shareModal: getElement('shareModal'),
@@ -1421,14 +1424,20 @@ function renderPasswordEditorFields() {
   });
 }
 
-/** @param {boolean} saving */
-function updateComposerSaving(saving) {
-  setComposerSaving(state, {
-    saveButton: els.saveBtn,
-    cancelButton: els.cancelBtn,
-    closeButton: els.closeModalBtn,
-    modal: state.editingInline ? els.readerEditor : els.editorModal
-  }, saving);
+function getComposerSnapshot() {
+  return createComposerDraftSnapshot({
+    recordType: state.editorRecordType,
+    title: els.editorTitle.value,
+    folderId: state.editorFolderId,
+    fields: state.editorPasswordFields,
+    markdown: state.editorRecordType === 'password' ? '' : serializeEditorMarkdown(els.documentEditor),
+    pendingCount: state.attachmentDraft.images.length,
+  });
+}
+
+/** @param {string} text */
+function setComposerSaveStatus(text) {
+  els.composerSaveStatus.textContent = text;
 }
 
 function renderComposerFolderSelect() {
@@ -1490,6 +1499,8 @@ function openComposer(note) {
     els.editorModal.classList.remove('hidden');
   }
   updateModalUi();
+  state.composerInitialSnapshot = getComposerSnapshot();
+  setComposerSaveStatus('');
   focusComposerPrimaryField(recordType, els.editorTitle, els.passwordEditorFields);
 }
 
@@ -1512,13 +1523,21 @@ function closeComposer(discardDraft = true) {
   state.editingId = null;
   state.editorPasswordFields = [];
   state.editorFolderId = null;
+  state.composerInitialSnapshot = null;
   els.editorTitle.value = '';
   els.editorContent.value = '';
   els.documentEditor.replaceChildren();
   els.passwordEditorFields.replaceChildren();
   els.editorPreview.replaceChildren();
   setAttachmentStatus('');
+  setComposerSaveStatus('');
   updateModalUi();
+}
+
+function requestCloseComposer() {
+  if (state.composerSaving) return;
+  if (state.composerInitialSnapshot !== null && state.composerInitialSnapshot !== getComposerSnapshot() && !confirm('放弃未保存内容吗？')) return;
+  closeComposer();
 }
 
 /** @param {string} noteId */
@@ -1706,7 +1725,13 @@ function queueEditorImage(image) {
 
 async function saveComposer() {
   if (state.composerSaving) return;
-  updateComposerSaving(true);
+  const savingHost = state.editingInline ? els.readerEditor : els.editorModal;
+  const releaseSaving = beginComposerSaving(state, {
+    saveButton: els.saveBtn,
+    cancelButton: els.cancelBtn,
+    host: savingHost,
+  });
+  setComposerSaveStatus('保存中…');
   try {
   const password = state.editorRecordType === 'password';
   const title = els.editorTitle.value.trim() || '无标题';
@@ -1771,12 +1796,17 @@ async function saveComposer() {
   }
 
   const reopenReaderId = state.editingInline ? state.editingId : null;
+  state.composerInitialSnapshot = getComposerSnapshot();
   closeComposer(false);
   await refreshNotes();
   if (reopenReaderId) await openReader(reopenReaderId);
   setStatus('已保存');
+  setComposerSaveStatus('');
+  } catch (error) {
+    setComposerSaveStatus(error instanceof Error ? error.message : '保存失败');
+    throw error;
   } finally {
-    updateComposerSaving(false);
+    releaseSaving();
   }
 }
 
@@ -2448,8 +2478,10 @@ els.attachmentDropZone.addEventListener('drop', function (event) {
   }
 });
 
-els.closeModalBtn.onclick = function () { closeComposer(); };
-els.cancelBtn.onclick = function () { closeComposer(); };
+els.cancelBtn.onclick = requestCloseComposer;
+els.editorModal.addEventListener('click', function (event) {
+  if (event.target === els.editorModal) requestCloseComposer();
+});
 els.saveBtn.onclick = function () {
   saveComposer().catch(function (error) {
     setStatus(error.message || '保存失败');
@@ -2492,7 +2524,7 @@ document.addEventListener('keydown', function (event) {
       closeShareDialog();
     } else if (state.editingInline || !els.editorModal.classList.contains('hidden')) {
       if (state.composerSaving) setStatus('正在保存，请稍候');
-      else closeComposer();
+      else requestCloseComposer();
     } else if (state.navigationOpen) {
       event.preventDefault();
       closeNavigation();

@@ -184,7 +184,13 @@
             <h2 id="modalTitle" class="section-title">新建笔记</h2>
             <div class="section-desc">记录会在此设备加密后保存，正文支持在线文档式编辑。</div>
           </div>
-          <button id="closeModalBtn" class="btn secondary">关闭</button>
+        </div>
+        <div id="composerActionBar" class="composer-action-bar" aria-label="编辑操作">
+          <div id="composerSaveStatus" class="composer-save-status" role="status" aria-live="polite"></div>
+          <div class="composer-action-buttons">
+            <button id="cancelBtn" class="btn secondary" type="button">取消</button>
+            <button id="saveBtn" class="btn" type="button">保存</button>
+          </div>
         </div>
         <input id="editorTitle" class="input" placeholder="记录标题" />
         <label class="field-label composer-folder-label" for="editorFolder">文件夹</label>
@@ -217,10 +223,6 @@
         <div id="documentEditor" class="document-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="笔记正文" data-placeholder="开始写作…"></div>
         <textarea id="editorContent" class="textarea hidden" aria-hidden="true" tabindex="-1"></textarea>
         <div id="editorPreview" class="markdown-body editor-preview hidden"></div>
-        <div class="modal-actions">
-          <button id="cancelBtn" class="btn secondary">取消</button>
-          <button id="saveBtn" class="btn">保存</button>
-        </div>
       </div>
     </div>
     <div id="folderDialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="folderDialogTitle" tabindex="-1">
