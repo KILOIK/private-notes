@@ -82,13 +82,15 @@
             </div>
             <div class="security-panel-actions">
               <button id="enrollTotpBtn" class="btn secondary" type="button">绑定 Authenticator</button>
-              <button id="disableTotpBtn" class="btn danger" type="button">关闭二次验证</button>
             </div>
             <div id="totpEnrollmentPanel" class="totp-enrollment hidden">
               <p class="field-help">请在 Authenticator 中添加下方密钥或扫描二维码内容；密钥和恢复码只显示一次。</p>
               <code id="totpSecretLabel" class="totp-secret"></code>
               <textarea id="totpRecoveryCodes" class="textarea recovery-codes" readonly></textarea>
               <button id="confirmTotpBtn" class="btn" type="button">我已保存恢复码</button>
+            </div>
+            <div class="security-secondary-action">
+              <button id="disableTotpBtn" class="security-secondary-action-btn hidden" type="button">关闭二次验证</button>
             </div>
           </section>
           <button id="settingsLogoutBtn" class="btn danger settings-logout" type="button">退出登录</button>

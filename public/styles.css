@@ -659,6 +659,34 @@ button, input, textarea { font: inherit; }
   flex-wrap: wrap;
   justify-content: end;
 }
+.security-secondary-action {
+  grid-column: 1 / -1;
+  display: flex;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid #d1fae5;
+}
+.security-secondary-action-btn {
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+.security-secondary-action-btn:hover {
+  color: #b91c1c;
+}
+.security-secondary-action-btn:focus-visible {
+  outline: 2px solid #b91c1c;
+  outline-offset: 2px;
+  color: #b91c1c;
+}
 .totp-panel .btn,
 .totp-enrollment .btn {
   width: 100%;

@@ -239,6 +239,11 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('aria-label="分享笔记"');
 		expect(appHtml).toContain('aria-label="编辑笔记"');
 		expect(appHtml.indexOf('id="readerDeleteBtn"')).toBeGreaterThan(appHtml.indexOf('id="readerMoreMenu"'));
+		const securityActionsStart = appHtml.indexOf('class="security-panel-actions"');
+		const securityActionsEnd = appHtml.indexOf('</div>', securityActionsStart);
+		const disableTotpIndex = appHtml.indexOf('id="disableTotpBtn"');
+		expect(disableTotpIndex).toBeGreaterThan(securityActionsEnd);
+		expect(appHtml).toContain('class="security-secondary-action-btn hidden"');
 		expect(appHtml).toContain('<link rel="stylesheet" href="/workspace.css" />');
 		expect(appHtml).not.toContain('class="card workspace-sidebar"');
 		expect(appHtml).not.toContain('class="card feed"');
