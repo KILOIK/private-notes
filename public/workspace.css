@@ -531,6 +531,13 @@
   box-shadow: none;
 }
 
+.reader-editor-card .document-toolbar {
+  margin-left: -48px;
+  margin-right: -48px;
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
 .reader-editor-card .textarea {
   min-height: min(56dvh, 640px);
 }
@@ -610,6 +617,9 @@
 }
 
 .password-reader-field .password-reader-value {
+  grid-column: 2;
+  grid-row: 1;
+  width: auto;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -624,6 +634,8 @@
 }
 
 .password-reader-actions {
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1010,6 +1022,13 @@ a:focus-visible {
     margin-bottom: 10px;
     padding-left: 0;
     padding-right: 0;
+  }
+
+  .reader-editor-card .document-toolbar {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
   }
 
   .btn,

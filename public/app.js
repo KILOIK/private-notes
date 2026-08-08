@@ -2381,6 +2381,9 @@ els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(functio
 els.disableTotpBtn.onclick = function () { disableTotp().catch(function (error) { setStatus(error.message || '关闭失败'); }); };
 
 els.editorToolbar.querySelectorAll('[data-editor-command]').forEach(function (button) {
+  button.addEventListener('mousedown', function (event) {
+    event.preventDefault();
+  });
   button.addEventListener('click', function () {
     const command = button.getAttribute('data-editor-command') || '';
     runEditorCommand(els.documentEditor, command);

@@ -840,6 +840,7 @@ button, input, textarea { font: inherit; }
   flex-wrap: nowrap;
   min-height: 52px;
   margin: 0 -4px 14px;
+  gap: 2px;
   padding: 4px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -851,7 +852,7 @@ button, input, textarea { font: inherit; }
   min-width: 44px;
   min-height: 44px;
   height: 44px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 8px;
 }
 .is-document-composer #editorTitle {

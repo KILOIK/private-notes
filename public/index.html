@@ -182,7 +182,7 @@
         <div class="modal-head">
           <div>
             <h2 id="modalTitle" class="section-title">新建笔记</h2>
-            <div class="section-desc">保留简单编辑窗，平时主要还是用来浏览和复制。</div>
+            <div class="section-desc">记录会在此设备加密后保存，正文支持在线文档式编辑。</div>
           </div>
           <button id="closeModalBtn" class="btn secondary">关闭</button>
         </div>
@@ -196,20 +196,20 @@
         </div>
         <div class="editor-spacer"></div>
         <div id="editorToolbar" class="editor-toolbar document-toolbar" role="toolbar" aria-label="文档工具栏">
-          <button class="btn secondary" type="button" data-editor-command="undo">撤销</button>
-          <button class="btn secondary" type="button" data-editor-command="redo">重做</button>
-          <button class="btn secondary" type="button" data-editor-command="paragraph">正文</button>
-          <button class="btn secondary" type="button" data-editor-command="heading">标题</button>
-          <button class="btn secondary" type="button" data-editor-command="bold">粗体</button>
-          <button class="btn secondary" type="button" data-editor-command="italic">斜体</button>
-          <button class="btn secondary" type="button" data-editor-command="underline">下划线</button>
-          <button class="btn secondary" type="button" data-editor-command="strike">删除线</button>
-          <button class="btn secondary" type="button" data-editor-command="quote">引用</button>
-          <button class="btn secondary" type="button" data-editor-command="unordered-list">列表</button>
-          <button class="btn secondary" type="button" data-editor-command="ordered-list">编号</button>
-          <button class="btn secondary" type="button" data-editor-command="code-block">代码块</button>
-          <button id="insertLinkBtn" class="btn secondary" type="button">链接</button>
-          <button id="insertImageBtn" class="btn secondary" type="button">图片</button>
+          <button class="btn secondary" type="button" data-editor-command="undo" aria-label="撤销" title="撤销">撤</button>
+          <button class="btn secondary" type="button" data-editor-command="redo" aria-label="重做" title="重做">重</button>
+          <button class="btn secondary" type="button" data-editor-command="paragraph" aria-label="正文" title="正文">段</button>
+          <button class="btn secondary" type="button" data-editor-command="heading" aria-label="标题" title="标题">H</button>
+          <button class="btn secondary" type="button" data-editor-command="bold" aria-label="粗体" title="粗体">B</button>
+          <button class="btn secondary" type="button" data-editor-command="italic" aria-label="斜体" title="斜体">I</button>
+          <button class="btn secondary" type="button" data-editor-command="underline" aria-label="下划线" title="下划线">U</button>
+          <button class="btn secondary" type="button" data-editor-command="strike" aria-label="删除线" title="删除线">S</button>
+          <button class="btn secondary" type="button" data-editor-command="quote" aria-label="引用" title="引用">引</button>
+          <button class="btn secondary" type="button" data-editor-command="unordered-list" aria-label="列表" title="列表">•</button>
+          <button class="btn secondary" type="button" data-editor-command="ordered-list" aria-label="编号列表" title="编号列表">1.</button>
+          <button class="btn secondary" type="button" data-editor-command="code-block" aria-label="代码块" title="代码块">&lt;/&gt;</button>
+          <button id="insertLinkBtn" class="btn secondary" type="button" aria-label="链接" title="链接">链</button>
+          <button id="insertImageBtn" class="btn secondary" type="button" aria-label="图片" title="图片">图</button>
         </div>
         <div id="attachmentDropZone" class="attachment-drop-zone" tabindex="0">将图片粘贴或拖到这里，图片会先在浏览器加密</div>
         <div id="attachmentStatus" class="attachment-status" role="status"></div>
