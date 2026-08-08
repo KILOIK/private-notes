@@ -12,7 +12,7 @@ import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthSta
 import { beginComposerSaving } from './composer-saving.js';
 import { createComposerDraftSnapshot } from './composer-draft.js';
 import { completeComposerSave } from './composer-post-save.js';
-import { createComposerSaveRecovery, getComposerRetryNote, getUncommittedAttachmentIds, updateComposerSaveRecovery } from './composer-recovery.js';
+import { createComposerSaveRecovery, getComposerRetryNote, getUncommittedAttachmentIds, markComposerSaveCommitted, updateComposerSaveRecovery } from './composer-recovery.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
@@ -1835,6 +1835,7 @@ async function saveComposer() {
       revision: committedRevision,
       attachmentIds,
     });
+  markComposerSaveCommitted(state, getComposerSnapshot());
 
   const reopenReaderId = state.editingInline ? state.editingId : null;
   await completeComposerSave({

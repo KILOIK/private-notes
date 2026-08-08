@@ -3,6 +3,7 @@ import {
 	createComposerSaveRecovery,
 	getComposerRetryNote,
 	getUncommittedAttachmentIds,
+	markComposerSaveCommitted,
 	updateComposerSaveRecovery,
 } from '../public/composer-recovery.js';
 
@@ -37,5 +38,12 @@ describe('composer post-save recovery', () => {
 			revision: 5,
 			attachmentIds: new Set(['new']),
 		});
+	});
+
+	it('updates the discard baseline once the API save has committed', () => {
+		const state = { composerInitialSnapshot: 'before-save' };
+
+		markComposerSaveCommitted(state, 'after-save');
+		expect(state.composerInitialSnapshot).toBe('after-save');
 	});
 });

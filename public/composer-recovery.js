@@ -29,6 +29,14 @@ export function updateComposerSaveRecovery(recovery, note, attachmentIds) {
 }
 
 /**
+ * @param {{ composerInitialSnapshot: string | null }} state
+ * @param {string} snapshot
+ */
+export function markComposerSaveCommitted(state, snapshot) {
+  state.composerInitialSnapshot = snapshot;
+}
+
+/**
  * @param {string | null} editingId
  * @param {Array<{ id: string, revision: number }>} notes
  * @param {ComposerSaveRecovery | null} recovery
