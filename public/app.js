@@ -11,6 +11,7 @@ import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { beginComposerSaving } from './composer-saving.js';
 import { createComposerDraftSnapshot } from './composer-draft.js';
+import { completeComposerSave } from './composer-post-save.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
@@ -1534,6 +1535,30 @@ function closeComposer(discardDraft = true) {
   updateModalUi();
 }
 
+function prepareInlineReaderOpen() {
+  if (!state.editingInline) return;
+  els.readerEditor.classList.add('hidden');
+  els.editorModal.appendChild(els.editorCard);
+  els.editorCard.classList.remove('reader-editor-card');
+  els.readerDocument.classList.remove('hidden');
+  els.readerDetail.classList.remove('is-editing');
+  els.editorModal.classList.add('hidden');
+  state.editingInline = false;
+  updateModalUi();
+}
+
+function restoreInlineComposer() {
+  if (state.editingInline) return;
+  els.readerDocument.classList.add('hidden');
+  els.readerEditor.appendChild(els.editorCard);
+  els.readerEditor.classList.remove('hidden');
+  els.readerDetail.classList.add('is-editing');
+  els.editorCard.classList.add('reader-editor-card');
+  els.editorModal.classList.add('hidden');
+  state.editingInline = true;
+  updateModalUi();
+}
+
 function requestCloseComposer() {
   if (state.composerSaving) return;
   if (state.composerInitialSnapshot !== null && state.composerInitialSnapshot !== getComposerSnapshot() && !confirm('放弃未保存内容吗？')) return;
@@ -1734,8 +1759,7 @@ async function saveComposer() {
   setComposerSaveStatus('保存中…');
   try {
   const password = state.editorRecordType === 'password';
-  const title = els.editorTitle.value.trim() || '无标题';
-  const passwordPayload = password ? buildPasswordSavePayload(title, state.editorPasswordFields, state.editorFolderId) : null;
+  const rawTitle = els.editorTitle.value.trim();
   await Promise.all(state.attachmentDraft.images.map(function (image) {
     if (image.error) throw image.error;
     return image.uploadPromise || Promise.resolve();
@@ -1748,14 +1772,13 @@ async function saveComposer() {
       markdown = replacePendingToken(markdown, image.token, image.attachmentId);
     }
   }
-  if (!password && !title && !markdown) {
-    setStatus('标题和内容至少写一个');
-    return;
-  }
+  if (!rawTitle && !markdown) throw new Error('标题和内容至少写一个');
   if (!state.vaultUnlocked || !state.vaultKey) {
-    setStatus('请先输入本地解锁密钥');
-    return;
+    throw new Error('请先输入本地解锁密钥');
   }
+
+  const title = rawTitle || '无标题';
+  const passwordPayload = password ? buildPasswordSavePayload(title, state.editorPasswordFields, state.editorFolderId) : null;
 
   setStatus('保存中…');
 
@@ -1796,10 +1819,14 @@ async function saveComposer() {
   }
 
   const reopenReaderId = state.editingInline ? state.editingId : null;
-  state.composerInitialSnapshot = getComposerSnapshot();
-  closeComposer(false);
-  await refreshNotes();
-  if (reopenReaderId) await openReader(reopenReaderId);
+  await completeComposerSave({
+    refreshNotes,
+    openReader,
+    closeComposer,
+    reopenReaderId,
+    prepareReaderOpen: prepareInlineReaderOpen,
+    restoreComposer: restoreInlineComposer,
+  });
   setStatus('已保存');
   setComposerSaveStatus('');
   } catch (error) {
