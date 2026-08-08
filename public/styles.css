@@ -265,6 +265,29 @@ button, input, textarea { font: inherit; }
 .settings-btn-icon { display: none; }
 .settings-drawer-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:18px; }
 .settings-section-title { margin:0; font-size:16px; }
+.settings-form-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--panel-border);
+}
+.settings-description-input {
+  min-height: 84px;
+  resize: vertical;
+}
+.auth-devices-list {
+  display: grid;
+  gap: 8px;
+}
+.auth-device-row {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: #fafafa;
+}
 .settings-logout { width:100%; margin-top:18px; }
 .category-nav, .folder-nav { display:flex; gap:8px; align-items:center; overflow-x:auto; scrollbar-width:none; padding:2px 0 10px; }
 .category-nav::-webkit-scrollbar, .folder-nav::-webkit-scrollbar { display:none; }

@@ -9,6 +9,16 @@ export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 export const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const SESSION_COOKIE_NAME = '__Host-session';
 export const MAX_PASSWORD_LENGTH = 1024;
+export const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
+export const SESSION_IDLE_TIMEOUT_OPTIONS = [300, 900, 1800, 3600, 14400] as const;
+
+export type LoginBranding = { title: string; description: string };
+export type AuthSettings = { login: LoginBranding; idleTimeoutSeconds: number };
+
+const DEFAULT_LOGIN_BRANDING: LoginBranding = {
+	title: '正在打开我的笔记',
+	description: '输入密码后即可进入应用，并在本地解锁你的加密笔记。',
+};
 
 const LOGIN_MAX_FAILED_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -21,6 +31,8 @@ const MANAGED_SIGNING_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TOTP_ENABLED_META_KEY = 'totp_enabled';
 const TOTP_SECRET_META_KEY = 'totp_secret:v1';
 const TOTP_PENDING_META_KEY = 'totp_pending:v1';
+const LOGIN_BRANDING_META_KEY = 'branding_login:v1';
+const SESSION_IDLE_TIMEOUT_META_KEY = 'session_idle_timeout_seconds:v1';
 const TOTP_CHALLENGE_PREFIX = 'totp_challenge:v1:';
 const TOTP_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const UNSAFE_NEW_APP_PASSWORDS = new Set(['replace-with-a-long-unique-passphrase']);
@@ -39,6 +51,12 @@ export type SessionData = {
 	vaultId: string;
 	reauthRequired: boolean;
 	sessionId: string | null;
+};
+
+export type SessionDeviceMetadata = {
+	deviceLabel: string;
+	userAgent: string;
+	loginIp: string;
 };
 
 type VerifiedToken = { vaultId: string; sessionId: string | null; legacy: boolean; exp: number };
@@ -231,6 +249,44 @@ async function hashOpaque(value: string) {
 	return base64UrlEncode(new Uint8Array(digest));
 }
 
+function normalizeSettingText(value: unknown, maxLength: number) {
+	if (typeof value !== 'string' || /[<>]/.test(value)) return null;
+	const normalized = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+	if (!normalized) return null;
+	return Array.from(normalized).slice(0, maxLength).join('');
+}
+
+export function normalizeLoginBranding(value: unknown): LoginBranding | null {
+	if (!value || typeof value !== 'object') return null;
+	const candidate = value as { title?: unknown; description?: unknown };
+	const title = normalizeSettingText(candidate.title, 64);
+	const description = normalizeSettingText(candidate.description, 160);
+	return title && description ? { title, description } : null;
+}
+
+export function normalizeIdleTimeoutSeconds(value: unknown) {
+	return typeof value === 'number' && SESSION_IDLE_TIMEOUT_OPTIONS.includes(value as (typeof SESSION_IDLE_TIMEOUT_OPTIONS)[number])
+		? value
+		: null;
+}
+
+export async function getAuthSettings(env: AuthEnv): Promise<AuthSettings> {
+	const rows = await env.DB.prepare('SELECT key, value FROM app_meta WHERE key IN (?, ?)')
+		.bind(LOGIN_BRANDING_META_KEY, SESSION_IDLE_TIMEOUT_META_KEY)
+		.all<{ key: string; value: string }>();
+	const values = new Map((rows.results ?? []).map((row) => [row.key, row.value]));
+	let login = DEFAULT_LOGIN_BRANDING;
+	try {
+		const parsed = JSON.parse(values.get(LOGIN_BRANDING_META_KEY) || '') as unknown;
+		login = normalizeLoginBranding(parsed) || DEFAULT_LOGIN_BRANDING;
+	} catch {
+		// Fall back to safe defaults when an older or malformed value is present.
+	}
+	const parsedTimeout = Number(values.get(SESSION_IDLE_TIMEOUT_META_KEY));
+	const idleTimeoutSeconds = normalizeIdleTimeoutSeconds(parsedTimeout) ?? DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS;
+	return { login, idleTimeoutSeconds };
+}
+
 export async function isTotpEnabled(env: AuthEnv) {
 	const row = await env.DB.prepare('SELECT value FROM app_meta WHERE key = ? LIMIT 1')
 		.bind(TOTP_ENABLED_META_KEY).first<{ value: string }>();
@@ -257,7 +313,12 @@ export async function getVaultIdForPassword(env: AuthEnv, password: string) {
 	return null;
 }
 
-export async function createSessionToken(env: AuthEnv, vaultId = DEFAULT_VAULT_ID, existingSessionId?: string) {
+export async function createSessionToken(
+	env: AuthEnv,
+	vaultId = DEFAULT_VAULT_ID,
+	existingSessionId?: string,
+	metadata?: SessionDeviceMetadata
+) {
 	if (getAuthConfigurationError(env)) return '';
 	const normalizedVaultId = normalizeVaultId(vaultId);
 	const credential = getVaultCredentials(env).find((item) => item.vaultId === normalizedVaultId);
@@ -268,11 +329,28 @@ export async function createSessionToken(env: AuthEnv, vaultId = DEFAULT_VAULT_I
 	const sessionId = existingSessionId || base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
 	const idHash = await hashOpaque(sessionId);
 	await env.DB.prepare(
-		`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, NULL)
-		 ON CONFLICT(id_hash) DO UPDATE SET vault_id = excluded.vault_id, expires_at = excluded.expires_at`
+		`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at, device_label, user_agent, login_ip, login_at)
+		 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+		 ON CONFLICT(id_hash) DO UPDATE SET
+			vault_id = excluded.vault_id,
+			expires_at = excluded.expires_at,
+			device_label = COALESCE(auth_sessions.device_label, excluded.device_label),
+			user_agent = COALESCE(auth_sessions.user_agent, excluded.user_agent),
+			login_ip = COALESCE(auth_sessions.login_ip, excluded.login_ip),
+			login_at = COALESCE(auth_sessions.login_at, excluded.login_at)`
 	)
-		.bind(idHash, normalizedVaultId, nowMs, nowMs, nowMs, nowMs + SESSION_MAX_AGE_SECONDS * 1000)
+		.bind(
+			idHash,
+			normalizedVaultId,
+			nowMs,
+			nowMs,
+			nowMs,
+			nowMs + SESSION_MAX_AGE_SECONDS * 1000,
+			metadata?.deviceLabel ?? null,
+			metadata?.userAgent ?? null,
+			metadata?.loginIp ?? null,
+			metadata ? nowMs : null
+		)
 		.run();
 	const payload = base64UrlEncode(
 		JSON.stringify({
@@ -339,6 +417,7 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 	const verified = await verifySessionToken(env, session);
 	if (!verified) return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
 	const totpEnabled = await isTotpEnabled(env);
+	const authSettings = await getAuthSettings(env);
 	const sessionId = verified.sessionId || await hashOpaque(session);
 	const idHash = await hashOpaque(sessionId);
 	if (verified.legacy) {
@@ -354,7 +433,7 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 	if (!row || row.revoked_at || row.expires_at <= Date.now()) {
 		return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
 	}
-	const reauthRequired = verified.legacy ? totpEnabled : Date.now() - row.last_activity_at > SESSION_IDLE_TIMEOUT_MS;
+	const reauthRequired = verified.legacy ? totpEnabled : Date.now() - row.last_activity_at > authSettings.idleTimeoutSeconds * 1000;
 	return { authenticated: true, vaultId: verified.vaultId, reauthRequired, sessionId };
 }
 
@@ -379,6 +458,37 @@ export async function requireActiveSession(
 
 function getClientIp(request: Request) {
 	return (request.headers.get('cf-connecting-ip') || 'unknown').slice(0, 128);
+}
+
+export function getSessionDeviceMetadata(request: Request): SessionDeviceMetadata {
+	const userAgent = (request.headers.get('user-agent') || '未知客户端').slice(0, 512);
+	const deviceLabel = (/iPhone|iPad|Android|Macintosh|Windows|Linux/i.exec(userAgent)?.[0] || '未知设备').slice(0, 80);
+	return { deviceLabel, userAgent, loginIp: getClientIp(request) };
+}
+
+export async function listAuthDevices(env: AuthEnv, vaultId: string, currentSessionId: string | null) {
+	const currentHash = currentSessionId ? await hashOpaque(currentSessionId) : null;
+	const result = await env.DB.prepare(
+		`SELECT id_hash, device_label, user_agent, login_ip, login_at, last_activity_at
+		 FROM auth_sessions
+		 WHERE vault_id = ? AND revoked_at IS NULL
+		 ORDER BY COALESCE(login_at, created_at) DESC, id_hash DESC`
+	).bind(normalizeVaultId(vaultId)).all<{
+		id_hash: string;
+		device_label: string | null;
+		user_agent: string | null;
+		login_ip: string | null;
+		login_at: number | null;
+		last_activity_at: number;
+	}>();
+	return (result.results ?? []).map((row) => ({
+		deviceLabel: row.device_label || '未知设备',
+		userAgent: row.user_agent || '未知客户端',
+		loginIp: row.login_ip || 'unknown',
+		loginAt: row.login_at ?? null,
+		lastActivityAt: row.last_activity_at,
+		current: currentHash === row.id_hash,
+	}));
 }
 
 async function getLoginRateLimitKey(request: Request, env: AuthEnv) {

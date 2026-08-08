@@ -25,6 +25,8 @@ const APPLIED_MIGRATIONS = [
 	'0009_totp_sessions.sql',
 	'0010_note_folders.sql',
 	'0011_note_trash.sql',
+	'0012_auth_settings.sql',
+	'0013_auth_device_metadata.sql',
 ] as const;
 
 const schemaChecks = new WeakMap<object, Promise<void>>();
@@ -171,14 +173,22 @@ async function initializeFreshDatabase(db: D1Database) {
 		),
 		db.prepare(
 			`CREATE TABLE IF NOT EXISTS auth_sessions (
-			 id_hash TEXT PRIMARY KEY,
+				 id_hash TEXT PRIMARY KEY,
 			 vault_id TEXT NOT NULL,
 			 created_at INTEGER NOT NULL,
 			 last_activity_at INTEGER NOT NULL,
 			 last_reauth_at INTEGER NOT NULL,
 			 expires_at INTEGER NOT NULL,
-			 revoked_at INTEGER
+				 revoked_at INTEGER,
+				 device_label TEXT,
+				 user_agent TEXT,
+				 login_ip TEXT,
+				 login_at INTEGER
 			)`
+		),
+		db.prepare(
+			`CREATE INDEX IF NOT EXISTS idx_auth_sessions_vault_login_at
+			 ON auth_sessions(vault_id, login_at DESC)`
 		),
 		db.prepare(
 			`CREATE INDEX IF NOT EXISTS idx_auth_sessions_vault_activity

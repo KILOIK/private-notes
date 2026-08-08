@@ -50,6 +50,9 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * legacyPlaintextCount: number,
  * unlockError: string,
  * appShortName: string,
+ * loginTitle: string,
+ * loginDescription: string,
+ * idleTimeoutSeconds: number,
  * readerNoteId: string | null,
  * readerOperation: ReturnType<typeof createLatestOperation>,
  * editorMode: 'source' | 'preview',
@@ -106,6 +109,9 @@ const state = {
   legacyPlaintextCount: 0,
   unlockError: '',
   appShortName: document.documentElement.dataset.appShortName || '我的笔记',
+  loginTitle: '正在打开我的笔记',
+  loginDescription: '输入密码后即可进入应用，并在本地解锁你的加密笔记。',
+  idleTimeoutSeconds: 1800,
   readerNoteId: null,
   readerOperation: createLatestOperation(),
   editorMode: 'source',
@@ -196,6 +202,13 @@ const els = {
   totpRecoveryInput: getInput('totpRecoveryInput'),
   totpStatus: getElement('totpStatus'),
   totpVerifyBtn: getButton('totpVerifyBtn'),
+  loginTitleInput: getInput('loginTitleInput'),
+  loginDescriptionInput: getTextArea('loginDescriptionInput'),
+  idleTimeoutSelect: getSelect('idleTimeoutSelect'),
+  authSettingsPassword: getInput('authSettingsPassword'),
+  saveAuthSettingsBtn: getButton('saveAuthSettingsBtn'),
+  authSettingsStatus: getElement('authSettingsStatus'),
+  authDevicesList: getElement('authDevicesList'),
   topbar: getElement('topbar'),
   searchInput: getInput('searchInput'),
   clearSearchBtn: getButton('clearSearchBtn'),
@@ -452,6 +465,12 @@ function openSettings() {
   setSettingsSurfaceOpen(true);
   setSettingsBackgroundInert(true);
   els.settingsPanel.focus();
+  loadAuthSettings().catch(function (error) {
+    els.authSettingsStatus.textContent = error instanceof Error ? error.message : '读取登录设置失败';
+  });
+  loadAuthDevices().catch(function (error) {
+    els.authDevicesList.textContent = error instanceof Error ? error.message : '读取登录记录失败';
+  });
 }
 
 function closeSettings() {
@@ -661,17 +680,17 @@ function updateLoginMode() {
   els.passwordInput.disabled = checking;
   els.loginBtn.disabled = checking;
   if (checking) {
-    els.loginTitle.textContent = '正在打开' + state.appShortName;
+    els.loginTitle.textContent = state.loginTitle;
     els.loginDesc.textContent = '正在检查当前设备的访问状态，页面会保持在原位。';
     els.passwordInput.placeholder = '请稍候…';
     els.passwordHelp.textContent = '刷新时不再切换页面，只会显示这层锁屏。';
     els.loginBtn.textContent = '请稍候…';
     return;
   }
-  els.loginTitle.textContent = unlockOnly ? '解锁' + state.appShortName : '登录到' + state.appShortName;
+  els.loginTitle.textContent = unlockOnly ? '解锁' + state.appShortName : state.loginTitle;
   els.loginDesc.textContent = unlockOnly
     ? '你已经通过访问验证。现在输入密码解锁本地加密内容；刷新后不会再出现页面跳转。'
-    : '输入密码后即可进入应用，并在本地解锁你的加密笔记。';
+    : state.loginDescription;
   els.passwordInput.placeholder = unlockOnly ? '输入解锁密码' : '输入访问密码';
   els.passwordHelp.textContent = unlockOnly
     ? '密码只在本次页面会话中用于派生解密密钥，不再明文保存到 localStorage。'
@@ -802,7 +821,7 @@ function lockVault(reason) {
     state.authMode = 'unlock';
   }
   showLogin();
-  setStatus(reason === 'idle' ? '已锁定：超过 30 分钟无操作，请重新验证' : '需要重新验证');
+  setStatus(reason === 'idle' ? `已锁定：超过 ${Math.round(state.idleTimeoutSeconds / 60)} 分钟无操作，请重新验证` : '需要重新验证');
 }
 
 function scheduleIdleLock() {
@@ -810,7 +829,7 @@ function scheduleIdleLock() {
   if (!state.sessionAuthenticated || !state.vaultUnlocked) return;
   state.idleTimer = window.setTimeout(function () {
     lockVault('idle');
-  }, 30 * 60 * 1000);
+  }, state.idleTimeoutSeconds * 1000);
 }
 
 function recordUserActivity() {
@@ -859,6 +878,74 @@ async function refreshMeta() {
   state.totpEnabled = Boolean(data.totpEnabled);
   updateTotpUi();
   updateVaultUi();
+}
+
+async function loadPublicConfig() {
+  const data = await api('/api/public-config', undefined, { recordActivity: false });
+  if (data.login && typeof data.login.title === 'string' && typeof data.login.description === 'string') {
+    state.loginTitle = data.login.title;
+    state.loginDescription = data.login.description;
+  }
+  if (Number.isSafeInteger(data.idleTimeoutSeconds)) state.idleTimeoutSeconds = data.idleTimeoutSeconds;
+}
+
+/** @param {{ login: { title: string, description: string }, idleTimeoutSeconds: number }} settings */
+function applyAuthSettingsToForm(settings) {
+  state.loginTitle = settings.login.title;
+  state.loginDescription = settings.login.description;
+  state.idleTimeoutSeconds = settings.idleTimeoutSeconds;
+  els.loginTitleInput.value = settings.login.title;
+  els.loginDescriptionInput.value = settings.login.description;
+  els.idleTimeoutSelect.value = String(settings.idleTimeoutSeconds);
+}
+
+async function loadAuthSettings() {
+  const data = await api('/api/auth/settings');
+  applyAuthSettingsToForm(data);
+}
+
+async function saveAuthSettings() {
+  const password = els.authSettingsPassword.value;
+  const title = els.loginTitleInput.value;
+  const description = els.loginDescriptionInput.value;
+  const idleTimeoutSeconds = Number(els.idleTimeoutSelect.value);
+  if (!password) throw new Error('请输入当前密码');
+  const data = await api('/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password, login: { title, description }, idleTimeoutSeconds }),
+  });
+  applyAuthSettingsToForm(data);
+  els.authSettingsPassword.value = '';
+  els.authSettingsStatus.textContent = '登录设置已保存';
+}
+
+/** @param {Array<{ deviceLabel?: string, current?: boolean, loginIp?: string, loginAt?: number|null, lastActivityAt?: number|null }>} devices */
+function renderAuthDevices(devices) {
+  els.authDevicesList.replaceChildren();
+  if (!Array.isArray(devices) || devices.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'field-help';
+    empty.textContent = '暂无登录记录';
+    els.authDevicesList.appendChild(empty);
+    return;
+  }
+  devices.forEach(function (device) {
+    const row = document.createElement('div');
+    row.className = 'auth-device-row';
+    const title = document.createElement('strong');
+    title.textContent = String(device.deviceLabel || '未知设备') + (device.current ? ' · 当前设备' : '');
+    const detail = document.createElement('div');
+    detail.className = 'field-help';
+    detail.textContent = `${device.loginIp || 'unknown'} · 登录 ${formatDate(device.loginAt || 0)} · 最近活动 ${formatDate(device.lastActivityAt || 0)}`;
+    row.append(title, detail);
+    els.authDevicesList.appendChild(row);
+  });
+}
+
+async function loadAuthDevices() {
+  const data = await api('/api/auth/devices');
+  renderAuthDevices(data.devices);
 }
 
 /**
@@ -1160,6 +1247,12 @@ function showApp() {
 els.settingsBtn.onclick = openSettings;
 els.closeSettingsBtn.onclick = closeSettings;
 els.settingsBackdrop.onclick = closeSettings;
+els.saveAuthSettingsBtn.onclick = function () {
+  els.authSettingsStatus.textContent = '保存中…';
+  saveAuthSettings().catch(function (error) {
+    els.authSettingsStatus.textContent = error instanceof Error ? error.message : '保存登录设置失败';
+  });
+};
 els.settingsLogoutBtn.onclick = function () {
   logout().catch(function (error) {
     setStatus(error instanceof Error ? error.message : '退出失败');
@@ -2270,6 +2363,7 @@ async function submitReauth(password, code) {
 }
 
 async function checkSession() {
+  await loadPublicConfig();
   showChecking();
   const data = await api('/api/session');
   if (data.authenticated) {

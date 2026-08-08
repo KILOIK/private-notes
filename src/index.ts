@@ -22,6 +22,11 @@ import {
 	recordFailedLogin,
 	resolveCookieSecret,
 	tooManyLoginAttempts,
+	getAuthSettings,
+	normalizeLoginBranding,
+	normalizeIdleTimeoutSeconds,
+	getSessionDeviceMetadata,
+	listAuthDevices,
 } from './auth';
 import { generateRecoveryCodes, hashRecoveryCode, generateTotpSecret, verifyTotpCode } from './totp';
 import { encryptTotpSecret, decryptTotpSecret } from './totp-secret';
@@ -649,6 +654,39 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		return json({ ok: true, authenticated: session.authenticated, vaultId: session.vaultId, reauthRequired: session.reauthRequired });
 	}
 
+	if (url.pathname === '/api/public-config' && request.method === 'GET') {
+		const settings = await getAuthSettings(env);
+		return json({ ok: true, login: settings.login, idleTimeoutSeconds: settings.idleTimeoutSeconds });
+	}
+
+	if (url.pathname === '/api/auth/settings' && request.method === 'GET') {
+		await requireActiveSession(request, env, { touch: true });
+		const settings = await getAuthSettings(env);
+		return json({ ok: true, login: settings.login, idleTimeoutSeconds: settings.idleTimeoutSeconds });
+	}
+
+	if (url.pathname === '/api/auth/settings' && request.method === 'PUT') {
+		const session = await requireActiveSession(request, env, { touch: true });
+		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
+		if (typeof body.password !== 'string' || (await getVaultIdForPassword(env, body.password)) !== session.vaultId) return unauthorized();
+		const login = normalizeLoginBranding(body.login);
+		const idleTimeoutSeconds = normalizeIdleTimeoutSeconds(body.idleTimeoutSeconds);
+		if (!login || idleTimeoutSeconds === null) throw new ApiError(400, 'invalid_auth_settings', 'invalid login branding or idle timeout');
+		await env.DB.batch([
+			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+				.bind('branding_login:v1', JSON.stringify(login)),
+			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+				.bind('session_idle_timeout_seconds:v1', String(idleTimeoutSeconds)),
+		]);
+		return json({ ok: true, login, idleTimeoutSeconds });
+	}
+
+	if (url.pathname === '/api/auth/devices' && request.method === 'GET') {
+		const session = await requireActiveSession(request, env, { touch: true });
+		const devices = await listAuthDevices(env, session.vaultId, session.sessionId);
+		return json({ ok: true, devices });
+	}
+
 	if (url.pathname === '/api/login' && request.method === 'POST') {
 		const body = await readJsonObject(request, MAX_LOGIN_BODY_BYTES);
 		if (typeof body.password !== 'string' || !body.password || body.password.length > MAX_PASSWORD_LENGTH) {
@@ -672,7 +710,7 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 			const challengeId = await createPendingTwoFactorChallenge(env, vaultId, fingerprint);
 			return json({ ok: false, code: 'two_factor_required', challengeId }, 202);
 		}
-		const token = await createSessionToken(env, vaultId);
+		const token = await createSessionToken(env, vaultId, undefined, getSessionDeviceMetadata(request));
 		if (!token) throw new Error('failed to create session token');
 
 		return json(
@@ -698,7 +736,7 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 			return unauthorized();
 		}
 		await clearFailedLogins(env, rateLimit.key);
-		const token = await createSessionToken(env, session.vaultId, session.sessionId || undefined);
+		const token = await createSessionToken(env, session.vaultId, session.sessionId || undefined, getSessionDeviceMetadata(request));
 		return json(
 			{ ok: true, vaultId: session.vaultId },
 			200,

@@ -220,6 +220,11 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('data-totp-index="5"');
 		expect(appHtml).toContain('id="totpBackBtn"');
 		expect(appHtml).toContain('id="totpRecoveryToggleBtn"');
+		expect(appHtml).toContain('id="loginTitleInput"');
+		expect(appHtml).toContain('id="loginDescriptionInput"');
+		expect(appHtml).toContain('id="idleTimeoutSelect"');
+		expect(appHtml).toContain('id="saveAuthSettingsBtn"');
+		expect(appHtml).toContain('id="authDevicesList"');
 		expect(appHtml).toContain('role="dialog"');
 		expect(appHtml).toContain('aria-modal="true"');
 		expect(appHtml).toContain('class="settings-backdrop hidden"');
@@ -316,6 +321,75 @@ describe('private-notes worker', () => {
 		expect(sharePage.headers.get('content-security-policy')).toContain("default-src 'self'");
 		expect(sharePage.headers.get('content-security-policy')).toContain("img-src 'self' blob:");
 		expect(await sharePage.text()).toContain('查看并销毁');
+	});
+
+	it('serves default public login configuration without authentication', async () => {
+		const response = await api('/api/public-config');
+		expect(response.status).toBe(200);
+		expect(await jsonBody(response)).toMatchObject({
+			ok: true,
+			login: {
+				title: '正在打开我的笔记',
+				description: '输入密码后即可进入应用，并在本地解锁你的加密笔记。',
+			},
+			idleTimeoutSeconds: 1800,
+		});
+	});
+
+	it('protects login configuration writes and applies validated values to public reads', async () => {
+		const unauthorizedResponse = await api('/api/auth/settings');
+		expect(unauthorizedResponse.status).toBe(401);
+		const { cookie } = await login();
+		const invalid = await api('/api/auth/settings', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD, login: { title: '<script>alert(1)</script>', description: 'bad' }, idleTimeoutSeconds: 1 }),
+		});
+		expect(invalid.status).toBe(400);
+		const updated = await api('/api/auth/settings', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD, login: { title: '我的安全笔记', description: '输入密码后进入。' }, idleTimeoutSeconds: 900 }),
+		});
+		expect(updated.status).toBe(200);
+		expect(await jsonBody(await api('/api/public-config'))).toMatchObject({
+			login: { title: '我的安全笔记', description: '输入密码后进入。' },
+			idleTimeoutSeconds: 900,
+		});
+	});
+
+	it('enforces the configured idle timeout in the server session check', async () => {
+		const { cookie } = await login();
+		const updated = await api('/api/auth/settings', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json', cookie },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD, login: { title: '标题', description: '说明' }, idleTimeoutSeconds: 300 }),
+		});
+		expect(updated.status).toBe(200);
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(Date.now() - 301_000).run();
+		const session = await api('/api/session', { headers: { cookie } });
+		expect(await jsonBody(session)).toMatchObject({ authenticated: true, reauthRequired: true });
+	});
+
+	it('records authenticated device metadata and omits session secrets from the device list', async () => {
+		const first = await api('/api/login', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.10', 'user-agent': 'TestBrowser/1.0 (Macintosh)' },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+		});
+		expect(first.status).toBe(200);
+		const cookie = cookieFrom(first);
+		const stored = await env.DB.prepare('SELECT device_label, user_agent, login_ip, login_at FROM auth_sessions').first<JsonRecord>();
+		expect(stored).toMatchObject({ user_agent: 'TestBrowser/1.0 (Macintosh)', login_ip: '203.0.113.10' });
+		expect(stored?.device_label).toBeTruthy();
+		expect(typeof stored?.login_at).toBe('number');
+		const response = await api('/api/auth/devices', { headers: { cookie } });
+		expect(response.status).toBe(200);
+		const body = await jsonBody(response);
+		const devices = body.devices as JsonRecord[];
+		expect(devices[0]).toMatchObject({ current: true, loginIp: '203.0.113.10' });
+		expect(devices[0]).not.toHaveProperty('id_hash');
+		expect(devices[0]).not.toHaveProperty('sessionToken');
 	});
 
 	it('serves folder controls and settings drawer logout behavior', async () => {
@@ -616,6 +690,8 @@ describe('private-notes worker', () => {
 			'0009_totp_sessions.sql',
 			'0010_note_folders.sql',
 			'0011_note_trash.sql',
+			'0012_auth_settings.sql',
+			'0013_auth_device_metadata.sql',
 		]);
 		const noteColumns = await env.DB.prepare('PRAGMA table_info(notes)').all<{ name: string }>();
 		expect((noteColumns.results ?? []).map((column) => column.name)).toEqual([

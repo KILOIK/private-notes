@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { env } from 'cloudflare:workers';
 import { createDefaultPasswordFields } from '../public/password-fields.js';
 import { decodeNoteRecord } from '../public/note-records.js';
 import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from '../public/password-ui.js';
@@ -65,8 +65,8 @@ function descendants(root: TestElement): TestElement[] {
 }
 
 describe('password editor and reader behavior', () => {
-	it('defines a mobile reader layout with a full-width multiline value and separate actions', () => {
-		const styles = readFileSync(new URL('../public/workspace.css', import.meta.url), 'utf8');
+	it('defines a mobile reader layout with a full-width multiline value and separate actions', async () => {
+		const styles = await (await env.ASSETS.fetch(new Request('https://example.com/workspace.css'))).text();
 		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/);
 		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-value\s*\{[\s\S]*?grid-column:\s*1;[\s\S]*?width:\s*100%;/);
 		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-actions\s*\{[\s\S]*?grid-column:\s*1;/);

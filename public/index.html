@@ -119,6 +119,29 @@
               <button id="disableTotpBtn" class="security-secondary-action-btn hidden" type="button">关闭二次验证</button>
             </div>
           </section>
+          <section id="loginSettingsSection" class="settings-form-section" aria-labelledby="loginSettingsTitle">
+            <h3 id="loginSettingsTitle" class="settings-section-title">登录页面</h3>
+            <label class="field-label" for="loginTitleInput">页面标题</label>
+            <input id="loginTitleInput" class="input" maxlength="64" placeholder="正在打开我的笔记" />
+            <label class="field-label" for="loginDescriptionInput">页面说明</label>
+            <textarea id="loginDescriptionInput" class="textarea settings-description-input" maxlength="160" rows="3" placeholder="输入密码后即可进入应用，并在本地解锁你的加密笔记。"></textarea>
+            <label class="field-label" for="idleTimeoutSelect">闲置多久后要求重新验证</label>
+            <select id="idleTimeoutSelect" class="input">
+              <option value="300">5 分钟</option>
+              <option value="900">15 分钟</option>
+              <option value="1800">30 分钟</option>
+              <option value="3600">1 小时</option>
+              <option value="14400">4 小时</option>
+            </select>
+            <label class="field-label" for="authSettingsPassword">当前密码</label>
+            <input id="authSettingsPassword" class="input" type="password" autocomplete="current-password" placeholder="保存设置时验证" />
+            <button id="saveAuthSettingsBtn" class="btn" type="button">保存登录设置</button>
+            <div id="authSettingsStatus" class="field-help" role="status" aria-live="polite"></div>
+          </section>
+          <section id="authDevicesSection" class="settings-form-section" aria-labelledby="authDevicesTitle">
+            <h3 id="authDevicesTitle" class="settings-section-title">登录设备</h3>
+            <div id="authDevicesList" class="auth-devices-list" aria-live="polite"><div class="field-help">正在读取登录记录…</div></div>
+          </section>
           <button id="settingsLogoutBtn" class="btn danger settings-logout" type="button">退出登录</button>
         </aside>
         <button id="settingsBackdrop" class="settings-backdrop hidden" type="button" aria-label="关闭设置" aria-hidden="true"></button>
