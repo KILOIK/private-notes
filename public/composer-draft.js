@@ -1,5 +1,5 @@
 /**
- * @param {{ recordType?: string, title?: unknown, folderId?: unknown, fields?: unknown[], markdown?: unknown, pendingCount?: unknown }} draft
+ * @param {{ recordType?: string, title?: unknown, folderId?: unknown, fields?: Array<{ id?: unknown, type?: unknown, label?: unknown, value?: unknown }>, markdown?: unknown, pendingCount?: unknown }} draft
  * @returns {string}
  */
 export function createComposerDraftSnapshot(draft) {

@@ -116,7 +116,7 @@ function serializeList(list, depth = 0) {
   }).join('\n').trimEnd();
 }
 
-/** @param {any[]} nodes */
+/** @param {any[]} nodes @returns {string[]} */
 function serializeBlocks(nodes) {
   return nodes.flatMap(function (node) {
     const tag = getTagName(node);
@@ -128,7 +128,7 @@ function serializeBlocks(nodes) {
   });
 }
 
-/** @param {any} node */
+/** @param {any} node @returns {string} */
 function serializeBlock(node) {
   if (!node) return '';
   if (node.nodeType === 3 || !node.tagName) return escapeText(String(node.textContent || '')).trim();
@@ -136,7 +136,7 @@ function serializeBlock(node) {
   if (/^H[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.slice(1)))} ${childrenOf(node).map(serializeInline).join('')}`.trim();
   if (tag === 'P' || tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') return childrenOf(node).map(serializeInline).join('').trim();
   if (tag === 'BLOCKQUOTE') {
-    return serializeBlocks(childrenOf(node)).join('\n').split('\n').map((line) => `> ${line}`.trimEnd()).join('\n').trim();
+    return serializeBlocks(childrenOf(node)).join('\n').split('\n').map((line /** @type {string} */) => `> ${line}`.trimEnd()).join('\n').trim();
   }
   if (tag === 'UL' || tag === 'OL') {
     return serializeList(node);
