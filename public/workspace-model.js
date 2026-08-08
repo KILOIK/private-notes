@@ -39,7 +39,7 @@ export function buildNavigationModel(notes, folders, activeCategory, activeFolde
   });
 
   const scope = activeFolderId === null ? 'uncategorized' : `folder:${activeFolderId}`;
-  const activeKey = `${scope}:${activeCategory}`;
+  const activeKey = activeFolderId === undefined ? null : `${scope}:${activeCategory}`;
 
   Object.values(folderCounts).forEach(function (counts) { Object.freeze(counts); });
 

@@ -26,6 +26,11 @@ describe('PDF workspace model', () => {
 		expect(model.activeKey).toBe('folder:work:password');
 	});
 
+	it('leaves the folder tree without an active key in trash mode', () => {
+		const model = buildNavigationModel(notes, folders, 'all', undefined, 2);
+		expect(model.activeKey).toBeNull();
+	});
+
 	it('sorts visible notes without mutating input', () => {
 		expect(getSortOptions()).toEqual([
 		{ key: 'updated', label: '最近更新' },
