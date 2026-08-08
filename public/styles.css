@@ -189,6 +189,17 @@ button, input, textarea { font: inherit; }
   border-color: rgba(7, 193, 96, 0.65);
   box-shadow: 0 0 0 4px rgba(7, 193, 96, 0.12);
 }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .btn {
   height: 42px;
   padding: 0 16px;
@@ -296,8 +307,8 @@ button, input, textarea { font: inherit; }
 .folder-nav { margin-bottom:14px; padding-bottom:2px; }
 .password-fields, .password-editor-fields { display:grid; gap:10px; margin-top:16px; }
 .per-field-copy { color:var(--muted); font-size:12px; }
-.composer-folder-label { margin-top:14px; }
-.composer-folder-select { width:100%; }
+.composer-folder-action { display: flex; flex: 0 1 168px; min-width: 0; }
+.composer-folder-select { min-width: 0; height: 44px; padding: 0 10px; border-radius: 10px; }
 .folder-dialog-card { width:min(520px, 100%); }
 .folder-manager-list { display:grid; gap:8px; margin-bottom:18px; max-height:40vh; overflow-y:auto; }
 .folder-manager-empty { color:var(--muted); font-size:13px; padding:12px 0; }
@@ -620,6 +631,31 @@ button, input, textarea { font: inherit; }
   }
   .modal-head .section-title {
     font-size: 18px;
+  }
+  .composer-title-input {
+    min-height: 46px;
+    font-size: 26px;
+  }
+  .composer-action-bar {
+    flex-wrap: wrap;
+    align-items: stretch;
+    margin: 0 -14px 12px;
+    padding: 6px 14px;
+  }
+  .composer-save-status {
+    flex: 1 0 100%;
+  }
+  .composer-action-buttons {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .composer-folder-action {
+    min-width: 0;
+  }
+  .composer-action-buttons .btn {
+    min-width: 0;
+    padding: 0 13px;
   }
   .textarea {
     min-height: 48dvh;
@@ -952,13 +988,9 @@ button, input, textarea { font: inherit; }
 .is-document-composer .modal-head { order: 0; }
 .is-document-composer .composer-action-bar { order: 1; }
 .is-document-composer .document-toolbar { order: 2; }
-.is-document-composer #editorTitle { order: 3; }
-.is-document-composer .composer-folder-label { order: 4; }
-.is-document-composer .composer-folder-select { order: 5; }
-.is-document-composer .attachment-drop-zone { order: 6; }
-.is-document-composer .attachment-status { order: 7; }
-.is-document-composer #mobilePasteStatus { order: 8; }
-.is-document-composer .document-editor { order: 9; }
+.is-document-composer .attachment-status { order: 3; }
+.is-document-composer #mobilePasteStatus { order: 4; }
+.is-document-composer .document-editor { order: 5; }
 .document-toolbar {
   position: sticky;
   top: 56px;
@@ -981,24 +1013,25 @@ button, input, textarea { font: inherit; }
   padding: 0 8px;
   border-radius: 8px;
 }
-.is-document-composer #editorTitle {
+.composer-title-input {
+  width: 100%;
   height: auto;
   min-height: 52px;
-  margin: 0 0 10px;
+  margin: 0;
   padding: 4px 0;
   border: 0;
   border-radius: 0;
+  outline: none;
+  background: #ffffff;
   box-shadow: none;
   color: #111827;
+  font: inherit;
   font-size: 32px;
   font-weight: 750;
   line-height: 1.25;
 }
-.is-document-composer #editorTitle:focus {
+.composer-title-input:focus {
   box-shadow: 0 2px 0 rgba(7,193,96,.45);
-}
-.is-document-composer .composer-folder-label {
-  margin-top: 0;
 }
 .document-editor {
   min-height: min(56dvh, 640px);
@@ -1038,18 +1071,7 @@ button, input, textarea { font: inherit; }
   border-radius: 8px;
   object-fit: contain;
 }
-.attachment-drop-zone {
-  margin-bottom: 8px;
-  padding: 10px 12px;
-  border: 1px dashed #a7f3d0;
-  border-radius: 12px;
-  color: #166534;
-  background: #f0fdf4;
-  text-align: center;
-  outline: none;
-}
-.attachment-drop-zone:focus,
-.attachment-drop-zone.drag-over { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(7,193,96,.12); }
+#editorCard.drag-over { box-shadow: 0 0 0 3px rgba(7,193,96,.2); }
 .attachment-status { min-height: 18px; color: var(--muted); font-size: 12px; }
 .editor-preview { min-height: 320px; padding: 14px; border: 1px solid #e5e7eb; border-radius: 14px; background: #fff; }
 

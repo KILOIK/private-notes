@@ -221,23 +221,22 @@
     <div id="editorModal" class="modal-backdrop hidden">
       <div id="editorCard" class="card modal-card">
         <div class="modal-head">
-          <div>
-            <h2 id="modalTitle" class="section-title">新建笔记</h2>
-            <div class="section-desc">记录会在此设备加密后保存，正文支持在线文档式编辑。</div>
-          </div>
+          <h2 id="modalTitle" class="visually-hidden">新建笔记</h2>
+          <input id="editorTitle" class="composer-title-input" placeholder="记录标题" />
         </div>
         <div id="composerActionBar" class="composer-action-bar" aria-label="编辑操作">
           <div id="composerSaveStatus" class="composer-save-status" role="status" aria-live="polite"></div>
           <div class="composer-action-buttons">
+            <label class="composer-folder-action" for="editorFolder">
+              <span class="visually-hidden">文件夹</span>
+              <select id="editorFolder" class="input composer-folder-select">
+                <option value="">未分类</option>
+              </select>
+            </label>
             <button id="cancelBtn" class="btn secondary" type="button">取消</button>
             <button id="saveBtn" class="btn" type="button">保存</button>
           </div>
         </div>
-        <input id="editorTitle" class="input" placeholder="记录标题" />
-        <label class="field-label composer-folder-label" for="editorFolder">文件夹</label>
-        <select id="editorFolder" class="input composer-folder-select">
-          <option value="">未分类</option>
-        </select>
         <div id="passwordEditorFields" class="password-editor-fields hidden" aria-label="密码编辑字段">
           <span class="per-field-copy">每个字段都可以单独复制</span>
         </div>
@@ -258,7 +257,6 @@
           <button id="insertLinkBtn" class="btn secondary" type="button" aria-label="链接" title="链接">链</button>
           <button id="insertImageBtn" class="btn secondary" type="button" aria-label="图片" title="图片">图</button>
         </div>
-        <div id="attachmentDropZone" class="attachment-drop-zone" tabindex="0">将图片粘贴或拖到这里，图片会先在浏览器加密</div>
         <div id="attachmentStatus" class="attachment-status" role="status"></div>
         <div id="mobilePasteStatus" class="attachment-status" role="status" aria-live="polite">手机端可直接在正文区域粘贴图片</div>
         <div id="documentEditor" class="document-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="笔记正文" data-placeholder="开始写作…"></div>
