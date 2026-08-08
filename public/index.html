@@ -38,13 +38,39 @@
             <button id="loginBtn" class="btn login-submit">进入笔记</button>
             <button id="loginLogoutBtn" class="btn secondary login-logout hidden" type="button">退出当前会话</button>
           </div>
-          <div id="totpChallengePanel" class="totp-panel hidden">
-            <label class="field-label" for="totpCodeInput">Authenticator 验证码</label>
-            <input id="totpCodeInput" class="input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="输入 6 位验证码或恢复码" />
-            <button id="totpVerifyBtn" class="btn" type="button">验证并进入</button>
-          </div>
           <div class="security-note">客户端加密开启后，D1 只保存密文；搜索会在本地浏览器里完成。忘记密码将无法恢复旧密文。</div>
           <div id="loginStatus" class="login-foot"></div>
+        </div>
+      </section>
+
+      <section id="totpView" class="login-wrap hidden" aria-labelledby="totpTitle">
+        <div class="card login-card totp-card">
+          <div class="login-brand">
+            <div class="login-brand-icon">⌁</div>
+            <div>
+              <div class="login-mini">Private Notes</div>
+              <h1 id="totpTitle" class="login-title">验证 Authenticator</h1>
+            </div>
+          </div>
+          <p class="login-desc">输入 Authenticator 中显示的 6 位验证码后继续。</p>
+          <div id="totpInputs" class="totp-inputs" aria-label="6 位验证码">
+            <input class="totp-digit" data-totp-index="0" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="第 1 位验证码" />
+            <input class="totp-digit" data-totp-index="1" inputmode="numeric" maxlength="1" aria-label="第 2 位验证码" />
+            <input class="totp-digit" data-totp-index="2" inputmode="numeric" maxlength="1" aria-label="第 3 位验证码" />
+            <input class="totp-digit" data-totp-index="3" inputmode="numeric" maxlength="1" aria-label="第 4 位验证码" />
+            <input class="totp-digit" data-totp-index="4" inputmode="numeric" maxlength="1" aria-label="第 5 位验证码" />
+            <input class="totp-digit" data-totp-index="5" inputmode="numeric" maxlength="1" aria-label="第 6 位验证码" />
+          </div>
+          <div class="totp-actions">
+            <button id="totpBackBtn" class="btn secondary" type="button">返回登录</button>
+            <button id="totpVerifyBtn" class="btn" type="button">验证并进入</button>
+          </div>
+          <button id="totpRecoveryToggleBtn" class="text-button" type="button">使用恢复码</button>
+          <div id="totpRecoveryPanel" class="totp-recovery-panel hidden">
+            <label class="field-label" for="totpRecoveryInput">恢复码</label>
+            <input id="totpRecoveryInput" class="input" autocomplete="one-time-code" placeholder="输入一次性恢复码" />
+          </div>
+          <div id="totpStatus" class="login-foot" role="status" aria-live="polite"></div>
         </div>
       </section>
 

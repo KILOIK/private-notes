@@ -17,6 +17,7 @@ import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWo
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 import { getSettingsSurfaceState } from './settings-ui-state.js';
+import { moveTotpFocus, normalizeTotpInput } from './totp-input.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number, deleted_at?: number|null }} RawNote
@@ -40,7 +41,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * expandedIds: Set<string>,
  * statusTimer: number | null,
  * sessionAuthenticated: boolean,
- * authMode: 'checking' | 'login' | 'unlock',
+ * authMode: 'checking' | 'login' | 'unlock' | 'totp',
  * vaultUnlocked: boolean,
  * vaultKey: CryptoKey | null,
  * cryptoConfig: CryptoConfig | null,
@@ -178,6 +179,7 @@ function getButton(id) {
 
 const els = {
   loginView: getElement('loginView'),
+  totpView: getElement('totpView'),
   appView: getElement('appView'),
   unlockBadge: getElement('unlockBadge'),
   loginTitle: getElement('loginTitle'),
@@ -187,8 +189,12 @@ const els = {
   loginBtn: getButton('loginBtn'),
   loginLogoutBtn: getButton('loginLogoutBtn'),
   loginStatus: getElement('loginStatus'),
-  totpChallengePanel: getElement('totpChallengePanel'),
-  totpCodeInput: getInput('totpCodeInput'),
+  totpInputs: getElement('totpInputs'),
+  totpBackBtn: getButton('totpBackBtn'),
+  totpRecoveryToggleBtn: getButton('totpRecoveryToggleBtn'),
+  totpRecoveryPanel: getElement('totpRecoveryPanel'),
+  totpRecoveryInput: getInput('totpRecoveryInput'),
+  totpStatus: getElement('totpStatus'),
   totpVerifyBtn: getButton('totpVerifyBtn'),
   topbar: getElement('topbar'),
   searchInput: getInput('searchInput'),
@@ -290,6 +296,10 @@ const els = {
   folderNameInput: getInput('folderNameInput'),
   saveFolderBtn: getButton('saveFolderBtn')
 };
+
+function getTotpDigits() {
+  return /** @type {HTMLInputElement[]} */ (Array.from(els.totpInputs.querySelectorAll('[data-totp-index]')));
+}
 
 /** @param {string} text */
 function setStatus(text) {
@@ -650,8 +660,6 @@ function updateLoginMode() {
   els.loginLogoutBtn.classList.toggle('hidden', !unlockOnly);
   els.passwordInput.disabled = checking;
   els.loginBtn.disabled = checking;
-  els.totpChallengePanel.classList.toggle('hidden', !state.pendingLoginChallenge);
-  els.totpVerifyBtn.disabled = checking;
   if (checking) {
     els.loginTitle.textContent = '正在打开' + state.appShortName;
     els.loginDesc.textContent = '正在检查当前设备的访问状态，页面会保持在原位。';
@@ -660,7 +668,7 @@ function updateLoginMode() {
     els.loginBtn.textContent = '请稍候…';
     return;
   }
-  els.loginTitle.textContent = state.pendingLoginChallenge ? '验证 Authenticator' : (unlockOnly ? '解锁' + state.appShortName : '登录到' + state.appShortName);
+  els.loginTitle.textContent = unlockOnly ? '解锁' + state.appShortName : '登录到' + state.appShortName;
   els.loginDesc.textContent = unlockOnly
     ? '你已经通过访问验证。现在输入密码解锁本地加密内容；刷新后不会再出现页面跳转。'
     : '输入密码后即可进入应用，并在本地解锁你的加密笔记。';
@@ -668,7 +676,20 @@ function updateLoginMode() {
   els.passwordHelp.textContent = unlockOnly
     ? '密码只在本次页面会话中用于派生解密密钥，不再明文保存到 localStorage。'
     : '同一个密码同时用于访问站点和本地解密。';
-  els.loginBtn.textContent = state.pendingLoginChallenge ? '等待验证码' : (unlockOnly ? '解锁' + state.appShortName : '进入笔记');
+  els.loginBtn.textContent = unlockOnly ? '解锁' + state.appShortName : '进入笔记';
+}
+
+function showTotpView() {
+  state.authMode = 'totp';
+  els.loginView.classList.add('hidden');
+  els.totpView.classList.remove('hidden');
+  els.appView.classList.add('app-dimmed');
+  els.totpStatus.textContent = '';
+  els.totpRecoveryPanel.classList.add('hidden');
+  els.totpRecoveryInput.value = '';
+  getTotpDigits().forEach(function (input) { input.value = ''; });
+  const first = getTotpDigits()[0];
+  if (first) first.focus();
 }
 
 function updateVaultUi() {
@@ -709,7 +730,8 @@ function base64ToBytes(base64) {
 function clearSensitiveInputs() {
   els.passwordInput.value = '';
   els.vaultUnlockInput.value = '';
-  els.totpCodeInput.value = '';
+  getTotpDigits().forEach(function (input) { input.value = ''; });
+  els.totpRecoveryInput.value = '';
 }
 
 function clearAttachmentUrls() {
@@ -1107,6 +1129,7 @@ function applySearch() {
 function showLogin() {
   state.authMode = state.sessionAuthenticated ? 'unlock' : 'login';
   els.loginView.classList.remove('hidden');
+  els.totpView.classList.add('hidden');
   els.appView.classList.add('app-dimmed');
   updateLoginMode();
 }
@@ -1115,6 +1138,7 @@ function showChecking() {
   state.authMode = 'checking';
   els.loginStatus.textContent = '';
   els.loginView.classList.remove('hidden');
+  els.totpView.classList.add('hidden');
   els.appView.classList.add('app-dimmed');
   updateLoginMode();
 }
@@ -1122,6 +1146,7 @@ function showChecking() {
 function showApp() {
   if (state.sessionAuthenticated && state.vaultUnlocked) {
     els.loginView.classList.add('hidden');
+    els.totpView.classList.add('hidden');
     els.appView.classList.remove('app-dimmed');
     els.securityPanel.classList.remove('hidden');
     scheduleIdleLock();
@@ -2156,16 +2181,21 @@ async function beginTwoFactorLogin(password) {
   if (data.code !== 'two_factor_required' || typeof data.challengeId !== 'string') throw new Error('服务器未返回有效的二次验证挑战');
   state.pendingLoginChallenge = data.challengeId;
   state.pendingLoginPassword = password;
-  updateLoginMode();
-  els.totpCodeInput.focus();
+  showTotpView();
+}
+
+function getPendingTotpCode() {
+  if (!els.totpRecoveryPanel.classList.contains('hidden')) return els.totpRecoveryInput.value.trim();
+  return getTotpDigits().map(function (input) { return normalizeTotpInput(input.value); }).join('');
 }
 
 async function verifyPendingTotp() {
   if (!state.pendingLoginChallenge || !state.pendingLoginPassword) throw new Error('二次验证挑战已失效，请重新登录');
+  const code = getPendingTotpCode();
   const data = await api('/api/login/totp', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: els.totpCodeInput.value.trim() })
+    body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })
   });
   if (!data.ok) throw new Error('验证码无效');
   const password = state.pendingLoginPassword;
@@ -2284,9 +2314,7 @@ els.loginBtn.onclick = async function () {
       if (loginData.code === 'two_factor_required') {
         state.pendingLoginChallenge = String(loginData.challengeId || '');
         state.pendingLoginPassword = password;
-        updateLoginMode();
-        els.totpCodeInput.focus();
-        els.loginStatus.textContent = '请输入 Authenticator 验证码';
+        showTotpView();
         return;
       }
       performedLogin = true;
@@ -2328,12 +2356,42 @@ els.vaultUnlockInput.addEventListener('keydown', function (event) {
   if (event.key === 'Enter') els.unlockBtn.click();
 });
 
-els.totpCodeInput.addEventListener('keydown', function (event) {
-  if (event.key === 'Enter') els.totpVerifyBtn.click();
+getTotpDigits().forEach(function (input, index) {
+  input.addEventListener('input', function () {
+    const value = normalizeTotpInput(input.value);
+    input.value = value.slice(-1);
+    if (value) moveTotpFocus(getTotpDigits(), index, 1);
+  });
+  input.addEventListener('keydown', function (event) {
+    if (event.key === 'Backspace' && !input.value) moveTotpFocus(getTotpDigits(), index, -1);
+    if (event.key === 'ArrowLeft') moveTotpFocus(getTotpDigits(), index, -1);
+    if (event.key === 'ArrowRight') moveTotpFocus(getTotpDigits(), index, 1);
+    if (event.key === 'Enter') els.totpVerifyBtn.click();
+  });
+  input.addEventListener('paste', function (event) {
+    event.preventDefault();
+    const digits = normalizeTotpInput(event.clipboardData?.getData('text') || '');
+    getTotpDigits().forEach(function (target, targetIndex) {
+      if (targetIndex >= index && targetIndex - index < digits.length) target.value = digits[targetIndex - index];
+    });
+    moveTotpFocus(getTotpDigits(), Math.min(index + digits.length, getTotpDigits().length - 1), 0);
+  });
 });
+els.totpRecoveryToggleBtn.onclick = function () {
+  const showRecovery = els.totpRecoveryPanel.classList.contains('hidden');
+  els.totpRecoveryPanel.classList.toggle('hidden', !showRecovery);
+  els.totpRecoveryToggleBtn.textContent = showRecovery ? '使用验证码' : '使用恢复码';
+  if (showRecovery) els.totpRecoveryInput.focus();
+  else getTotpDigits()[0]?.focus();
+};
+els.totpBackBtn.onclick = function () {
+  state.pendingLoginChallenge = null;
+  state.pendingLoginPassword = '';
+  showLogin();
+};
 els.totpVerifyBtn.onclick = function () {
   verifyPendingTotp().catch(function (error) {
-    els.loginStatus.textContent = error instanceof Error ? error.message : '验证码无效';
+    els.totpStatus.textContent = error instanceof Error ? error.message : '验证码无效';
   });
 };
 

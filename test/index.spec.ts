@@ -210,10 +210,16 @@ describe('private-notes worker', () => {
 		const appHtml = await response.text();
 		expect(appHtml).toContain('Private Notes');
 		expect(appHtml).toContain('editorToolbar');
-		expect(appHtml).toContain('totpChallengePanel');
+		expect(appHtml).toContain('totpView');
 		expect(appHtml).toContain('settingsBtn');
 		expect(appHtml).toContain('settingsPanel');
 		expect(appHtml).toContain('settingsLogoutBtn');
+		expect(appHtml).toContain('id="totpView"');
+		expect(appHtml).toContain('id="totpInputs"');
+		expect(appHtml).toContain('data-totp-index="0"');
+		expect(appHtml).toContain('data-totp-index="5"');
+		expect(appHtml).toContain('id="totpBackBtn"');
+		expect(appHtml).toContain('id="totpRecoveryToggleBtn"');
 		expect(appHtml).toContain('role="dialog"');
 		expect(appHtml).toContain('aria-modal="true"');
 		expect(appHtml).toContain('class="settings-backdrop hidden"');
@@ -292,6 +298,10 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('function setSettingsScrollLock(locked)');
 		expect(appScript).toContain("els.settingsBackdrop.classList.toggle('hidden', !open);");
 		expect(appScript).toContain('els.settingsBackdrop.onclick = closeSettings;');
+		expect(appScript).toContain("function showTotpView()");
+		expect(appScript).toContain("normalizeTotpInput");
+		expect(appScript).toContain("body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })");
+		expect(appScript).not.toContain("localStorage.setItem('pendingLoginChallenge'");
 		expect(appScript).not.toContain('els.appView.inert = true;');
 		expect(appScript).toContain("from './workspace-view.js'");
 		expect(appScript).toContain('function syncWorkspacePresentation()');
