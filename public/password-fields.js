@@ -1,4 +1,3 @@
-const FIXED_FIELD_IDS = new Set(['name', 'username', 'password', 'url', 'notes']);
 const FIELD_TYPES = new Set(['text', 'secret', 'multiline']);
 
 /**
@@ -37,11 +36,12 @@ export function addCustomField(fields, type) {
  * @param {string} id
  * @returns {PasswordField[]}
  */
-export function removeCustomField(fields, id) {
+export function removePasswordField(fields, id) {
   if (!Array.isArray(fields)) throw new TypeError('password fields required');
-  if (FIXED_FIELD_IDS.has(id)) throw new Error('fixed fields cannot be removed');
   return fields.filter(function (field) { return field.id !== id; });
 }
+
+export const removeCustomField = removePasswordField;
 
 /** @param {HTMLInputElement} element */
 export function toggleSecretVisibility(element) {

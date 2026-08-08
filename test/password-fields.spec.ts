@@ -3,7 +3,7 @@ import {
 	addCustomField,
 	copyFieldValue,
 	createDefaultPasswordFields,
-	removeCustomField,
+	removePasswordField,
 	toggleSecretVisibility,
 } from '../public/password-fields.js';
 
@@ -26,12 +26,13 @@ describe('password field helpers', () => {
 		randomUUID.mockRestore();
 	});
 
-	it('removes only custom fields and rejects fixed-field removal', () => {
+	it('removes default and custom fields without mutating the source', () => {
 		const fields = addCustomField(createDefaultPasswordFields(), 'text');
 		const customId = fields.at(-1)?.id;
 		expect(customId).toBeTruthy();
-		expect(removeCustomField(fields, customId!)).toHaveLength(5);
-		expect(() => removeCustomField(fields, 'password')).toThrow(/fixed/i);
+		expect(removePasswordField(fields, customId!)).toHaveLength(5);
+		expect(removePasswordField(fields, 'password').map((field) => field.id)).not.toContain('password');
+		expect(fields).toHaveLength(6);
 	});
 
 	it('toggles only the target secret input without returning its plaintext value', () => {

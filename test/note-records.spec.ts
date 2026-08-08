@@ -59,8 +59,11 @@ describe('note record codecs', () => {
 		expect(Object.isFrozen(fields[0])).toBe(true);
 	});
 
-	it('rejects malformed password field definitions', () => {
-		expect(() => normalizePasswordFields([{ id: 'missing', type: 'text', label: 'x', value: '' }])).toThrow(/fixed/i);
+	it('accepts partial password fields and rejects malformed definitions', () => {
+		expect(normalizePasswordFields([{ id: 'username', type: 'text', label: '用户名', value: 'alice' }])).toEqual([
+			{ id: 'username', type: 'text', label: '用户名', value: 'alice' },
+		]);
+		expect(() => normalizePasswordFields([{ id: ' ', type: 'text', label: 'x', value: '' }])).toThrow(/field id/i);
 		expect(() => normalizePasswordFields([
 			{ id: 'name', type: 'unknown', label: 'Name', value: '' },
 		])).toThrow(/field type/i);
@@ -84,7 +87,7 @@ describe('note record codecs', () => {
 		expect(() => decodeNoteRecord(JSON.stringify({ type: 'note', markdown: '' }))).toThrow(/version/i);
 	});
 
-	it('encodes password records without a duplicate title property', () => {
+	it('encodes password records with an independent title property', () => {
 		const encoded = encodePasswordRecord({ type: 'password', folderId: 'folder-1', title: 'Ignored', fields: [
 			{ id: 'name', type: 'text', label: '名称', value: 'A' },
 			{ id: 'username', type: 'text', label: '用户名', value: 'u' },
@@ -92,11 +95,12 @@ describe('note record codecs', () => {
 			{ id: 'url', type: 'text', label: '网址', value: '' },
 			{ id: 'notes', type: 'multiline', label: '备注', value: '' },
 		] });
-		expect(Object.keys(JSON.parse(encoded))).toEqual(['v', 'type', 'folderId', 'fields']);
+		expect(Object.keys(JSON.parse(encoded))).toEqual(['v', 'type', 'folderId', 'title', 'fields']);
 		expect(decodeNoteRecord(encoded)).toEqual({
 			v: 1,
 			type: 'password',
 			folderId: 'folder-1',
+			title: 'Ignored',
 			fields: [
 				{ id: 'name', type: 'text', label: '名称', value: 'A' },
 				{ id: 'username', type: 'text', label: '用户名', value: 'u' },
@@ -104,6 +108,33 @@ describe('note record codecs', () => {
 				{ id: 'url', type: 'text', label: '网址', value: '' },
 				{ id: 'notes', type: 'multiline', label: '备注', value: '' },
 			],
+		});
+	});
+
+	it('keeps an independent password title and accepts zero fields', () => {
+		const content = encodePasswordRecord({ type: 'password', folderId: null, title: '身份记录', fields: [] });
+		expect(decodeNoteRecord(content)).toEqual({
+			v: 1,
+			type: 'password',
+			folderId: null,
+			title: '身份记录',
+			fields: [],
+		});
+	});
+
+	it('derives a legacy password title without restoring deleted fields', () => {
+		const record = decodeNoteRecord(JSON.stringify({
+			v: 1,
+			type: 'password',
+			folderId: null,
+			fields: [{ id: 'name', type: 'text', label: '名称', value: '旧账号' }],
+		}));
+		expect(record).toEqual({
+			v: 1,
+			type: 'password',
+			folderId: null,
+			title: '旧账号',
+			fields: [{ id: 'name', type: 'text', label: '名称', value: '旧账号' }],
 		});
 	});
 

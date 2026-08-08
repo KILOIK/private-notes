@@ -42,9 +42,9 @@ export function normalizePasswordFields(fields) {
     if (!label.trim() && !FIXED_PASSWORD_IDS.includes(id)) throw new Error('field label required');
     byId.set(id, { id, type, label, value: String(field.value ?? '') });
   }
-  for (const id of FIXED_PASSWORD_IDS) if (!byId.has(id)) throw new Error(`missing fixed field: ${id}`);
   const normalized = [];
   for (const id of FIXED_PASSWORD_IDS) {
+    if (!byId.has(id)) continue;
     const field = byId.get(id);
     const defaults = /** @type {any} */ (FIXED_DEFAULTS)[id];
     normalized.push({ ...field, type: defaults.type, label: field.label || defaults.label });
@@ -66,7 +66,10 @@ export function decodeNoteRecord(content) {
     return immutable({ v: 1, type: 'note', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, markdown: parsed.markdown });
   }
   if (parsed.type === 'password') {
-    return immutable({ v: 1, type: 'password', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, fields: normalizePasswordFields(parsed.fields) });
+    const fields = normalizePasswordFields(parsed.fields);
+    const legacyName = fields.find(function (/** @type {{ id: string, value: string }} */ field) { return field.id === 'name'; });
+    const title = typeof parsed.title === 'string' ? parsed.title : String(legacyName?.value || '');
+    return immutable({ v: 1, type: 'password', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, title, fields });
   }
   throw new Error('unknown record type');
 }
@@ -85,7 +88,13 @@ export function buildNoteSaveContent(markdown, folderId) {
 /** @param {any} record */
 export function encodePasswordRecord(record) {
   if (!record || typeof record !== 'object' || record.type !== 'password') throw new Error('invalid password record');
-  const result = { v: 1, type: 'password', folderId: typeof record.folderId === 'string' ? record.folderId : null, fields: normalizePasswordFields(record.fields) };
+  const result = {
+    v: 1,
+    type: 'password',
+    folderId: typeof record.folderId === 'string' ? record.folderId : null,
+    title: String(record.title || ''),
+    fields: normalizePasswordFields(record.fields),
+  };
   return JSON.stringify(result);
 }
 
