@@ -12,6 +12,7 @@ import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthSta
 import { beginComposerSaving } from './composer-saving.js';
 import { createComposerDraftSnapshot } from './composer-draft.js';
 import { completeComposerSave } from './composer-post-save.js';
+import { createComposerSaveRecovery, getComposerRetryNote, getUncommittedAttachmentIds, updateComposerSaveRecovery } from './composer-recovery.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
@@ -69,6 +70,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * editorFolderId: string | null
  * composerSaving: boolean
  * composerInitialSnapshot: string | null
+ * composerPostSaveRecovery: { noteId: string, revision: number, attachmentIds: Set<string> } | null
  * editingInline: boolean
  * workspaceMode: 'wide' | 'compact' | 'mobile'
  * navigationOpen: boolean
@@ -124,6 +126,7 @@ const state = {
   editorFolderId: null,
   composerSaving: false,
   composerInitialSnapshot: null,
+  composerPostSaveRecovery: null,
   editingInline: false,
   workspaceMode: getWorkspaceMode(window.innerWidth),
   navigationOpen: false,
@@ -704,15 +707,13 @@ function setAttachmentStatus(text) {
 
 async function discardAttachmentDraft() {
   const images = [...state.attachmentDraft.images];
+  const deletableAttachmentIds = getUncommittedAttachmentIds(images, state.composerPostSaveRecovery);
   clearAttachmentDraft(state.attachmentDraft);
   state.pendingAttachmentIds = [];
   await Promise.allSettled(images.map(function (image) {
     return image.uploadPromise || Promise.resolve();
   }));
-  const attachmentIds = images
-    .map(function (image) { return image.attachmentId; })
-    .filter(function (id) { return typeof id === 'string'; });
-  await Promise.allSettled(attachmentIds.map(function (id) {
+  await Promise.allSettled(deletableAttachmentIds.map(function (id) {
     return fetch('/api/attachments/' + encodeURIComponent(id), {
       method: 'DELETE',
       credentials: 'same-origin'
@@ -1462,6 +1463,7 @@ function renderPasswordReaderFields(record) {
 /** @param {Note | null} note */
 function openComposer(note) {
   clearAttachmentDraft(state.attachmentDraft);
+  state.composerPostSaveRecovery = null;
   state.editingId = note ? note.id : null;
   state.editorMode = 'source';
   state.pendingAttachmentIds = [];
@@ -1522,6 +1524,7 @@ function closeComposer(discardDraft = true) {
   els.editorModal.classList.add('hidden');
   state.editingInline = false;
   state.editingId = null;
+  state.composerPostSaveRecovery = null;
   state.editorPasswordFields = [];
   state.editorFolderId = null;
   state.composerInitialSnapshot = null;
@@ -1789,9 +1792,7 @@ async function saveComposer() {
 
   let data;
   if (state.editingId) {
-    const currentNote = state.allNotes.find(function (note) {
-      return note.id === state.editingId;
-    });
+    const currentNote = getComposerRetryNote(state.editingId, state.allNotes, state.composerPostSaveRecovery);
     if (!currentNote) {
       throw new Error('找不到待编辑的笔记，请刷新后重试');
     }
@@ -1817,6 +1818,23 @@ async function saveComposer() {
       })
     });
   }
+
+  const savedNote = data && data.note;
+  const committedNoteId = savedNote && typeof savedNote.id === 'string'
+    ? savedNote.id
+    : state.editingId || state.attachmentDraft.noteId;
+  const committedRevision = savedNote ? Number(savedNote.revision) : NaN;
+  if (!committedNoteId || !Number.isSafeInteger(committedRevision) || committedRevision < 1) {
+    throw new Error('服务器保存响应格式无效');
+  }
+  state.editingId = committedNoteId;
+  state.composerPostSaveRecovery = state.composerPostSaveRecovery
+    ? updateComposerSaveRecovery(state.composerPostSaveRecovery, { id: committedNoteId, revision: committedRevision }, attachmentIds)
+    : createComposerSaveRecovery({
+      noteId: committedNoteId,
+      revision: committedRevision,
+      attachmentIds,
+    });
 
   const reopenReaderId = state.editingInline ? state.editingId : null;
   await completeComposerSave({
