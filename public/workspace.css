@@ -589,10 +589,10 @@
 
 .password-reader-field {
   display: grid;
-  grid-template-columns: minmax(88px, 130px) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(96px, 150px) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 10px 0;
+  gap: 20px;
+  padding: 16px 0;
   border: 0;
   border-bottom: 1px solid var(--workspace-divider);
   border-radius: 0;
@@ -603,44 +603,43 @@
   min-width: 0;
   overflow: hidden;
   color: #64748b;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .password-reader-field .password-reader-value {
-  grid-column: auto;
-  width: 100%;
+  display: flex;
+  align-items: center;
   min-width: 0;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  min-height: 44px;
+  margin: 0;
+  overflow-wrap: anywhere;
   color: #1f2937;
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
-.password-reader-field .password-reader-value:focus {
-  border: 0;
-  box-shadow: 0 0 0 2px rgba(21, 128, 61, 0.16);
+.password-reader-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
 }
 
 .password-reader-field .password-field-action,
 .password-reader-field .password-field-copy {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: auto;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
   margin: 0;
+  padding: 0 8px;
   color: #64748b;
-  font-size: 16px;
+  font-size: 12px;
 }
 
 .password-reader-field .password-field-action:hover,
@@ -652,17 +651,12 @@
 }
 
 .password-reader-field.is-multiline {
-  grid-template-columns: minmax(88px, 130px) minmax(0, 1fr) auto;
   align-items: start;
 }
 
 .password-reader-field.is-multiline .password-reader-value {
-  height: auto;
   min-height: 72px;
-  padding: 6px 0;
-  overflow: auto;
-  resize: vertical;
-  white-space: pre-wrap;
+  padding: 8px 0;
 }
 
 .more-menu {

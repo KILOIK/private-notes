@@ -37,6 +37,7 @@ describe('PDF workspace model', () => {
 
 	it('keeps password display safe and marks multiline fields', () => {
 		const model = buildPasswordDisplayModel([
+			{ id: 'empty', type: 'text', label: '空字段', value: '' },
 			{ id: 'username', type: 'text', label: '用户名', value: 'user@example.com' },
 			{ id: 'password', type: 'secret', label: '密码', value: 'secret-value' },
 			{ id: 'notes', type: 'multiline', label: '备注', value: 'long\nnotes' },

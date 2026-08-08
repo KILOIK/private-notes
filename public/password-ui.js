@@ -120,47 +120,41 @@ export function renderPasswordReader(container, record, clipboard, onStatus) {
     const wrapper = document.createElement('div');
     wrapper.className = 'password-field password-reader-field' + (display.multiline ? ' is-multiline' : '');
     const label = document.createElement('span');
-    label.className = 'password-field-label';
+    label.className = 'password-field-label password-reader-label';
     label.textContent = display.label;
     wrapper.append(label);
 
-    let input;
-    if (display.multiline) {
-      input = document.createElement('textarea');
-      input.className = 'textarea password-reader-value';
-      input.rows = 3;
-      input.readOnly = true;
-    } else {
-      input = document.createElement('input');
-      input.className = 'input password-reader-value';
-      input.type = display.hidden ? 'password' : 'text';
-      input.readOnly = true;
-    }
-    input.value = display.value;
-    input.setAttribute('aria-label', display.label);
-    wrapper.append(input);
+    const value = document.createElement(display.multiline ? 'pre' : 'div');
+    value.className = 'password-reader-value';
+    value.textContent = display.hidden ? '•'.repeat(Math.max(8, Array.from(display.value).length)) : display.value;
+    value.setAttribute('aria-label', display.label);
+    wrapper.append(value);
 
-    if (display.hidden && input instanceof HTMLInputElement) {
+    const actions = document.createElement('div');
+    actions.className = 'password-reader-actions';
+
+    if (display.hidden) {
+      let hidden = true;
       const visibility = document.createElement('button');
       visibility.type = 'button';
       visibility.className = 'icon-btn password-field-action';
-      visibility.textContent = '◉';
+      visibility.textContent = '显示';
       visibility.setAttribute('aria-label', '显示密码');
       visibility.setAttribute('title', '显示密码');
       visibility.onclick = function () {
-        toggleSecretVisibility(input);
-        const hidden = input.type === 'password';
-        visibility.textContent = hidden ? '◉' : '◌';
+        hidden = !hidden;
+        value.textContent = hidden ? '•'.repeat(Math.max(8, Array.from(display.value).length)) : display.value;
+        visibility.textContent = hidden ? '显示' : '隐藏';
         visibility.setAttribute('aria-label', hidden ? '显示密码' : '隐藏密码');
         visibility.setAttribute('title', hidden ? '显示密码' : '隐藏密码');
       };
-      wrapper.append(visibility);
+      actions.append(visibility);
     }
 
     const copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'icon-btn password-field-copy';
-    copy.textContent = '⧉';
+    copy.textContent = '复制';
     copy.setAttribute('aria-label', '复制' + display.label);
     copy.setAttribute('title', '复制');
     copy.onclick = function () {
@@ -168,7 +162,8 @@ export function renderPasswordReader(container, record, clipboard, onStatus) {
         .then(function () { onStatus('字段已复制'); })
         .catch(function () { onStatus('复制失败，请检查剪贴板权限'); });
     };
-    wrapper.append(copy);
+    actions.append(copy);
+    wrapper.append(actions);
     container.append(wrapper);
   });
 }

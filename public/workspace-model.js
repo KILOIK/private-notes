@@ -62,7 +62,9 @@ export function sortVisibleNotes(notes, sortKey) {
 
 /** @param {Array<{ id: string, type: string, label: string, value: string }>} fields */
 export function buildPasswordDisplayModel(fields) {
-  return fields.map(function (field) {
+  return fields.filter(function (field) {
+    return String(field.value ?? '').length > 0;
+  }).map(function (field) {
     return Object.freeze({
       id: field.id,
       label: field.label || '字段',

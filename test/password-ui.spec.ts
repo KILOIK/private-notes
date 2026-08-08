@@ -130,16 +130,20 @@ describe('password editor and reader behavior', () => {
 			const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
 			const status = vi.fn();
 			const fields = createDefaultPasswordFields();
-			fields[0].value = 'Example account';
+			fields[0].value = '';
 			fields[2].value = 'not-logged-secret';
+			fields[4].value = 'line 1\nline 2';
 
 			renderPasswordReader(container, { type: 'password', fields }, clipboard, status);
 			const controls = descendants(container);
-			expect(controls.filter((element) => element.className.includes('password-reader-field'))).toHaveLength(5);
-			const secret = controls.find((element) => element.type === 'password');
-			expect(secret?.value).toBe('not-logged-secret');
-			const copy = controls.filter((element) => element.className.includes('password-field-copy'))[2];
-			expect(copy?.textContent).toBe('⧉');
+			expect(controls.filter((element) => element.className.includes('password-reader-field'))).toHaveLength(2);
+			const secret = controls.find((element) => element.className.includes('password-reader-value') && element.textContent.includes('•'));
+			expect(secret?.textContent).toBe('•'.repeat('not-logged-secret'.length));
+			const visibility = controls.find((element) => element.className.includes('password-field-action'));
+			visibility?.onclick?.();
+			expect(secret?.textContent).toBe('not-logged-secret');
+			const copy = controls.filter((element) => element.className.includes('password-field-copy'))[0];
+			expect(copy?.textContent).toBe('复制');
 			expect(copy?.onclick).toBeTypeOf('function');
 			copy?.onclick?.();
 			await vi.waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith('not-logged-secret'));
