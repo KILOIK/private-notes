@@ -918,6 +918,7 @@ async function saveAuthSettings() {
   applyAuthSettingsToForm(data);
   els.authSettingsPassword.value = '';
   els.authSettingsStatus.textContent = '登录设置已保存';
+  if (state.vaultUnlocked) scheduleIdleLock();
 }
 
 /** @param {Array<{ deviceLabel?: string, current?: boolean, loginIp?: string, loginAt?: number|null, lastActivityAt?: number|null }>} devices */

@@ -303,6 +303,7 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('function setSettingsScrollLock(locked)');
 		expect(appScript).toContain("els.settingsBackdrop.classList.toggle('hidden', !open);");
 		expect(appScript).toContain('els.settingsBackdrop.onclick = closeSettings;');
+		expect(appScript).toContain('if (state.vaultUnlocked) scheduleIdleLock();');
 		expect(appScript).toContain("function showTotpView()");
 		expect(appScript).toContain("normalizeTotpInput");
 		expect(appScript).toContain("body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })");
@@ -390,6 +391,32 @@ describe('private-notes worker', () => {
 		expect(devices[0]).toMatchObject({ current: true, loginIp: '203.0.113.10' });
 		expect(devices[0]).not.toHaveProperty('id_hash');
 		expect(devices[0]).not.toHaveProperty('sessionToken');
+	});
+
+	it('keeps null-compatible device history rows ordered and marks the current session', async () => {
+		const first = await api('/api/login', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.11', 'user-agent': 'FirstBrowser/1.0' },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+		});
+		const firstCookie = cookieFrom(first);
+		await env.DB.prepare('UPDATE auth_sessions SET login_at = ? WHERE login_ip = ?').bind(1000, '203.0.113.11').run();
+		await env.DB.prepare(
+			`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
+			 VALUES (?, ?, ?, ?, ?, ?, NULL)`
+		).bind('o'.repeat(43), 'default', 0, 0, 0, Date.now() + 1_000_000).run();
+		const second = await api('/api/login', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.12', 'user-agent': 'SecondBrowser/1.0' },
+			body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+		});
+		const secondCookie = cookieFrom(second);
+		await env.DB.prepare('UPDATE auth_sessions SET login_at = ? WHERE login_ip = ?').bind(3000, '203.0.113.12').run();
+		const response = await api('/api/auth/devices', { headers: { cookie: secondCookie } });
+		const devices = (await jsonBody(response)).devices as JsonRecord[];
+		expect(devices[0]).toMatchObject({ loginIp: '203.0.113.12', current: true });
+		expect(devices.at(-1)).toMatchObject({ deviceLabel: '未知设备', userAgent: '未知客户端', loginIp: 'unknown', current: false });
+		expect(firstCookie).not.toBe(secondCookie);
 	});
 
 	it('serves folder controls and settings drawer logout behavior', async () => {

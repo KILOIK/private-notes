@@ -416,7 +416,6 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 	if (!session) return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
 	const verified = await verifySessionToken(env, session);
 	if (!verified) return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
-	const totpEnabled = await isTotpEnabled(env);
 	const authSettings = await getAuthSettings(env);
 	const sessionId = verified.sessionId || await hashOpaque(session);
 	const idHash = await hashOpaque(sessionId);
@@ -433,7 +432,7 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 	if (!row || row.revoked_at || row.expires_at <= Date.now()) {
 		return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
 	}
-	const reauthRequired = verified.legacy ? totpEnabled : Date.now() - row.last_activity_at > authSettings.idleTimeoutSeconds * 1000;
+	const reauthRequired = Date.now() - row.last_activity_at > authSettings.idleTimeoutSeconds * 1000;
 	return { authenticated: true, vaultId: verified.vaultId, reauthRequired, sessionId };
 }
 
@@ -469,9 +468,9 @@ export function getSessionDeviceMetadata(request: Request): SessionDeviceMetadat
 export async function listAuthDevices(env: AuthEnv, vaultId: string, currentSessionId: string | null) {
 	const currentHash = currentSessionId ? await hashOpaque(currentSessionId) : null;
 	const result = await env.DB.prepare(
-		`SELECT id_hash, device_label, user_agent, login_ip, login_at, last_activity_at
+		 `SELECT id_hash, device_label, user_agent, login_ip, login_at, last_activity_at
 		 FROM auth_sessions
-		 WHERE vault_id = ? AND revoked_at IS NULL
+		 WHERE vault_id = ?
 		 ORDER BY COALESCE(login_at, created_at) DESC, id_hash DESC`
 	).bind(normalizeVaultId(vaultId)).all<{
 		id_hash: string;
