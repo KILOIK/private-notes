@@ -86,6 +86,10 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * listScrollTop: number
  * hasListScrollSnapshot: boolean
  * settingsReturnFocus: HTMLElement | null
+ * authDevicesCurrentCursor: string | null
+ * authDevicesPreviousCursors: Array<string | null>
+ * authDevicesNextCursor: string | null
+ * authDevicesLoading: boolean
  * folderReturnFocus: HTMLElement | null
  * editingFolderId: string | null
  * }} */
@@ -148,6 +152,10 @@ const state = {
   listScrollTop: 0,
   hasListScrollSnapshot: false,
   settingsReturnFocus: null,
+  authDevicesCurrentCursor: null,
+  authDevicesPreviousCursors: [],
+  authDevicesNextCursor: null,
+  authDevicesLoading: false,
   folderReturnFocus: null,
   editingFolderId: null
 };
@@ -215,6 +223,10 @@ const els = {
   saveAuthSettingsBtn: getButton('saveAuthSettingsBtn'),
   authSettingsStatus: getElement('authSettingsStatus'),
   authDevicesList: getElement('authDevicesList'),
+  authDevicesPagination: getElement('authDevicesPagination'),
+  authDevicesPreviousBtn: getButton('authDevicesPreviousBtn'),
+  authDevicesPageLabel: getElement('authDevicesPageLabel'),
+  authDevicesNextBtn: getButton('authDevicesNextBtn'),
   topbar: getElement('topbar'),
   searchInput: getInput('searchInput'),
   clearSearchBtn: getButton('clearSearchBtn'),
@@ -482,8 +494,8 @@ function openSettings() {
   loadAuthSettings().catch(function (error) {
     els.authSettingsStatus.textContent = error instanceof Error ? error.message : '读取登录设置失败';
   });
-  loadAuthDevices().catch(function (error) {
-    els.authDevicesList.textContent = error instanceof Error ? error.message : '读取登录记录失败';
+  loadAuthDevices(null, true).catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取登录记录失败');
   });
 }
 
@@ -960,10 +972,74 @@ function renderAuthDevices(devices) {
   });
 }
 
-async function loadAuthDevices() {
-  const data = await api('/api/auth/devices');
-  renderAuthDevices(data.devices);
+function updateAuthDevicesPagination() {
+  const visible = state.authDevicesPreviousCursors.length > 0 || Boolean(state.authDevicesNextCursor);
+  els.authDevicesPagination.classList.toggle('hidden', !visible);
+  els.authDevicesPageLabel.textContent = '第 ' + (state.authDevicesPreviousCursors.length + 1) + ' 页';
+  els.authDevicesPreviousBtn.disabled = state.authDevicesLoading || state.authDevicesPreviousCursors.length === 0;
+  els.authDevicesNextBtn.disabled = state.authDevicesLoading || !state.authDevicesNextCursor;
 }
+
+/** @param {string | null} cursor @param {boolean} [reset] */
+async function loadAuthDevices(cursor, reset) {
+  if (state.authDevicesLoading) return;
+  if (reset) {
+    state.authDevicesCurrentCursor = null;
+    state.authDevicesPreviousCursors = [];
+    state.authDevicesNextCursor = null;
+  }
+  state.authDevicesLoading = true;
+  els.authDevicesList.setAttribute('aria-busy', 'true');
+  updateAuthDevicesPagination();
+  try {
+    const data = await api('/api/auth/devices' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''));
+    if (!Array.isArray(data.devices)) throw new Error('服务器返回的登录记录格式无效');
+    state.authDevicesCurrentCursor = cursor;
+    state.authDevicesNextCursor = typeof data.nextCursor === 'string' && data.nextCursor ? data.nextCursor : null;
+    renderAuthDevices(data.devices);
+  } finally {
+    state.authDevicesLoading = false;
+    els.authDevicesList.removeAttribute('aria-busy');
+    updateAuthDevicesPagination();
+  }
+}
+
+async function loadNextAuthDevices() {
+  if (!state.authDevicesNextCursor || state.authDevicesLoading) return;
+  const cursor = state.authDevicesNextCursor;
+  state.authDevicesPreviousCursors.push(state.authDevicesCurrentCursor);
+  try {
+    await loadAuthDevices(cursor);
+  } catch (error) {
+    state.authDevicesPreviousCursors.pop();
+    updateAuthDevicesPagination();
+    throw error;
+  }
+}
+
+async function loadPreviousAuthDevices() {
+  if (state.authDevicesPreviousCursors.length === 0 || state.authDevicesLoading) return;
+  const cursor = state.authDevicesPreviousCursors.pop();
+  if (cursor === undefined) return;
+  try {
+    await loadAuthDevices(cursor);
+  } catch (error) {
+    state.authDevicesPreviousCursors.push(cursor);
+    updateAuthDevicesPagination();
+    throw error;
+  }
+}
+
+els.authDevicesNextBtn.onclick = function () {
+  loadNextAuthDevices().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取下一页登录记录失败');
+  });
+};
+els.authDevicesPreviousBtn.onclick = function () {
+  loadPreviousAuthDevices().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取上一页登录记录失败');
+  });
+};
 
 /**
  * @param {string} passphrase

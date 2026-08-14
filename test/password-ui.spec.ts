@@ -74,6 +74,7 @@ describe('password editor and reader behavior', () => {
 		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-value\s*\{[\s\S]*?grid-column:\s*2;/);
 		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-label\s*\{[\s\S]*?font-size:\s*12px;/);
 		expect(styles).toMatch(/\.password-reader-field \.password-field-action\s*\{[\s\S]*?min-width:\s*44px;/);
+		expect(styles).toContain(String.raw`content: '\1F441';`);
 	});
 
 	it('focuses the independent title for both note and password records', () => {

@@ -509,6 +509,14 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('returnFocus.focus();');
 	});
 
+	it('serves login-device pagination controls', async () => {
+		const appHtml = await (await env.ASSETS.fetch(new Request(`${ORIGIN}/`))).text();
+		expect(appHtml).toContain('id="authDevicesPagination"');
+		expect(appHtml).toContain('id="authDevicesPreviousBtn"');
+		expect(appHtml).toContain('id="authDevicesNextBtn"');
+		expect(appHtml).toContain('id="authDevicesPageLabel"');
+	});
+
 	it('applies public branding variables to app pages and the PWA manifest', async () => {
 		const brandedEnv = {
 			...env,

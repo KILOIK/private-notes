@@ -684,7 +684,7 @@
 }
 
 .password-visibility-toggle::before {
-  content: '\\1F441';
+  content: '\1F441';
   font-size: 16px;
 }
 
