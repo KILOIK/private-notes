@@ -27,6 +27,8 @@ import {
 	normalizeIdleTimeoutSeconds,
 	getSessionDeviceMetadata,
 	listAuthDevices,
+	AUTH_DEVICE_PAGE_SIZE,
+	type AuthDeviceCursor,
 } from './auth';
 import { generateRecoveryCodes, hashRecoveryCode, generateTotpSecret, verifyTotpCode } from './totp';
 import { encryptTotpSecret, decryptTotpSecret } from './totp-secret';
@@ -80,6 +82,8 @@ type TrashCursor = {
 	id: string;
 	deletedAt: number;
 };
+
+type DeviceCursor = AuthDeviceCursor;
 
 type NoteShare = {
 	ciphertext: string;
@@ -420,6 +424,29 @@ function decodeTrashCursor(value: string | null): TrashCursor | null {
 	}
 }
 
+function encodeDeviceCursor(device: DeviceCursor) {
+	return base64UrlEncode(JSON.stringify(device));
+}
+
+function decodeDeviceCursor(value: string | null): DeviceCursor | null {
+	if (!value) return null;
+	try {
+		const parsed = JSON.parse(base64UrlDecode(value)) as Partial<DeviceCursor>;
+		if (
+			!Number.isSafeInteger(parsed.loginAt) ||
+			(parsed.loginAt as number) < 0 ||
+			typeof parsed.idHash !== 'string' ||
+			!/^[A-Za-z0-9_-]{43}$/.test(parsed.idHash)
+		) {
+			throw new Error('invalid cursor fields');
+		}
+		return { loginAt: parsed.loginAt as number, idHash: parsed.idHash };
+	} catch (error) {
+		if (error instanceof ApiError) throw error;
+		throw new ApiError(400, 'invalid_cursor', 'invalid device cursor');
+	}
+}
+
 function getListLimit(value: string | null) {
 	if (value === null) return DEFAULT_LIST_LIMIT;
 	if (!/^\d{1,4}$/.test(value)) throw new ApiError(400, 'invalid_limit', 'limit must be an integer');
@@ -683,8 +710,14 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 
 	if (url.pathname === '/api/auth/devices' && request.method === 'GET') {
 		const session = await requireActiveSession(request, env, { touch: true });
-		const devices = await listAuthDevices(env, session.vaultId, session.sessionId);
-		return json({ ok: true, devices });
+		const result = await listAuthDevices(
+			env,
+			session.vaultId,
+			session.sessionId,
+			decodeDeviceCursor(url.searchParams.get('cursor')),
+			AUTH_DEVICE_PAGE_SIZE
+		);
+		return json({ ok: true, devices: result.devices, nextCursor: result.nextCursor ? encodeDeviceCursor(result.nextCursor) : null });
 	}
 
 	if (url.pathname === '/api/login' && request.method === 'POST') {

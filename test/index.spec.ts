@@ -434,6 +434,53 @@ describe('private-notes worker', () => {
 		expect(firstCookie).not.toBe(secondCookie);
 	});
 
+	it('retains only the newest 100 sessions and pages the device history', async () => {
+		const first = await login(DEFAULT_PASSWORD, '203.0.113.10');
+		await env.DB.prepare('UPDATE auth_sessions SET login_at = 0 WHERE login_ip = ?').bind('203.0.113.10').run();
+		for (let index = 1; index <= 100; index += 1) {
+			await env.DB.prepare(
+				`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at, login_ip, login_at)
+				 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+			)
+				.bind(
+					String(index).padStart(43, 'a'),
+					'default',
+					index,
+					index,
+					index,
+					Date.now() + 1_000_000,
+					`198.51.100.${index}`,
+					index
+				)
+				.run();
+		}
+
+		const newest = await login(DEFAULT_PASSWORD, '203.0.113.250');
+		const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(count?.count).toBe(100);
+		await expect(jsonBody(await api('/api/session', { headers: { cookie: first.cookie } }))).resolves.toMatchObject({ authenticated: false });
+		await expect(jsonBody(await api('/api/session', { headers: { cookie: newest.cookie } }))).resolves.toMatchObject({ authenticated: true });
+
+		const firstPage = await jsonBody(await api('/api/auth/devices', { headers: { cookie: newest.cookie } }));
+		expect(firstPage.devices).toHaveLength(10);
+		expect(typeof firstPage.nextCursor).toBe('string');
+		const secondPage = await jsonBody(
+			await api(`/api/auth/devices?cursor=${encodeURIComponent(String(firstPage.nextCursor))}`, { headers: { cookie: newest.cookie } })
+		);
+		expect(secondPage.devices).toHaveLength(10);
+		const firstIps = (firstPage.devices as JsonRecord[]).map((device) => device.loginIp);
+		const secondIps = (secondPage.devices as JsonRecord[]).map((device) => device.loginIp);
+		expect(new Set([...firstIps, ...secondIps]).size).toBe(20);
+	});
+
+	it('rejects malformed device-history cursors', async () => {
+		const { cookie } = await login();
+		const response = await api('/api/auth/devices?cursor=not-a-valid-cursor', { headers: { cookie } });
+		expect(response.status).toBe(400);
+		await expect(response.json()).resolves.toMatchObject({ code: 'invalid_cursor' });
+	});
+
 	it('serves folder controls and settings drawer logout behavior', async () => {
 		const appHtml = await (await env.ASSETS.fetch(new Request(`${ORIGIN}/`))).text();
 		expect(appHtml).toContain('id="folderList"');
