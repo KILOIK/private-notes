@@ -14,6 +14,7 @@ class TestElement {
 	readOnly = false;
 	focused = false;
 	onclick: (() => void) | null = null;
+	attributes = new Map<string, string>();
 	private listeners = new Map<string, Array<() => void>>();
 
 	append(...children: TestElement[]) {
@@ -24,7 +25,9 @@ class TestElement {
 		this.children = children;
 	}
 
-	setAttribute() {}
+	setAttribute(name: string, value: string) {
+		this.attributes.set(name, value);
+	}
 
 	focus() {
 		this.focused = true;
@@ -65,12 +68,12 @@ function descendants(root: TestElement): TestElement[] {
 }
 
 describe('password editor and reader behavior', () => {
-	it('defines a mobile reader layout with a full-width multiline value and separate actions', async () => {
+	it('keeps mobile password labels and values in horizontal columns', async () => {
 		const styles = await (await env.ASSETS.fetch(new Request('https://example.com/workspace.css'))).text();
-		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/);
-		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-value\s*\{[\s\S]*?grid-column:\s*1;[\s\S]*?width:\s*100%;/);
-		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-actions\s*\{[\s\S]*?grid-column:\s*1;/);
-		expect(styles).toMatch(/\.password-reader-field \.password-field-action,[\s\S]*?min-width:\s*44px;/);
+		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field\s*\{[\s\S]*?grid-template-columns:\s*minmax\(54px, 72px\) minmax\(0, 1fr\) auto;/);
+		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-value\s*\{[\s\S]*?grid-column:\s*2;/);
+		expect(styles).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.password-reader-field \.password-reader-label\s*\{[\s\S]*?font-size:\s*12px;/);
+		expect(styles).toMatch(/\.password-reader-field \.password-field-action\s*\{[\s\S]*?min-width:\s*44px;/);
 	});
 
 	it('focuses the independent title for both note and password records', () => {
@@ -132,7 +135,7 @@ describe('password editor and reader behavior', () => {
 		});
 	});
 
-	it('renders secret reader fields masked and copies only the clicked field value', async () => {
+	it('copies the clicked reader value and keeps secret visibility separate', async () => {
 		const restore = installDocument();
 		try {
 			const container = new TestElement();
@@ -148,16 +151,17 @@ describe('password editor and reader behavior', () => {
 			expect(controls.filter((element) => element.className.includes('password-reader-field'))).toHaveLength(2);
 			const secret = controls.find((element) => element.className.includes('password-reader-value') && element.textContent.includes('•'));
 			expect(secret?.textContent).toBe('•'.repeat('not-logged-secret'.length));
-			const visibility = controls.find((element) => element.className.includes('password-field-action'));
-			visibility?.onclick?.();
-			expect(secret?.textContent).toBe('not-logged-secret');
-			const copy = controls.filter((element) => element.className.includes('password-field-copy'))[0];
-			expect(copy?.textContent).toBe('复制');
-			expect(copy?.onclick).toBeTypeOf('function');
-			copy?.onclick?.();
+			expect(secret?.type).toBe('button');
+			secret?.onclick?.();
 			await vi.waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith('not-logged-secret'));
 			expect(clipboard.writeText).toHaveBeenCalledTimes(1);
 			expect(status).toHaveBeenCalledWith('字段已复制');
+			const visibility = controls.find((element) => element.className.includes('password-visibility-toggle'));
+			expect(visibility?.attributes.get('aria-label')).toBe('显示密码');
+			visibility?.onclick?.();
+			expect(secret?.textContent).toBe('not-logged-secret');
+			expect(clipboard.writeText).toHaveBeenCalledTimes(1);
+			expect(controls.some((element) => element.className.includes('password-field-copy'))).toBe(false);
 		} finally {
 			restore();
 		}

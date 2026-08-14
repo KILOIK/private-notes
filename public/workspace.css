@@ -633,18 +633,28 @@
 .password-reader-field .password-reader-value {
   grid-column: 2;
   grid-row: 1;
-  width: auto;
-  display: flex;
-  align-items: center;
+  width: 100%;
+  display: block;
   min-width: 0;
   min-height: 44px;
   margin: 0;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
   overflow-wrap: anywhere;
   color: #1f2937;
   font-family: inherit;
   font-size: 16px;
   line-height: 1.7;
+  text-align: left;
   white-space: pre-wrap;
+  cursor: copy;
+}
+
+.password-reader-field .password-reader-value:focus-visible {
+  outline: 2px solid var(--workspace-accent);
+  outline-offset: 2px;
 }
 
 .password-reader-actions {
@@ -656,8 +666,7 @@
   gap: 2px;
 }
 
-.password-reader-field .password-field-action,
-.password-reader-field .password-field-copy {
+.password-reader-field .password-field-action {
   width: auto;
   min-width: 44px;
   height: 44px;
@@ -669,11 +678,14 @@
 }
 
 .password-reader-field .password-field-action:hover,
-.password-reader-field .password-field-copy:hover,
-.password-reader-field .password-field-action:focus-visible,
-.password-reader-field .password-field-copy:focus-visible {
+.password-reader-field .password-field-action:focus-visible {
   background: #f0fdf4;
   color: #166534;
+}
+
+.password-visibility-toggle::before {
+  content: '\\1F441';
+  font-size: 16px;
 }
 
 .password-reader-field.is-multiline {
@@ -1025,20 +1037,23 @@ a:focus-visible {
   }
 
   .password-reader-field {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(54px, 72px) minmax(0, 1fr) auto;
+    align-items: start;
     gap: 8px;
     padding: 14px 0;
   }
 
-  .password-reader-field .password-field-label {
+  .password-reader-field .password-reader-label {
     grid-column: 1;
-    grid-row: auto;
-    white-space: normal;
+    grid-row: 1;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: nowrap;
   }
 
   .password-reader-field .password-reader-value {
-    grid-column: 1;
-    grid-row: auto;
+    grid-column: 2;
+    grid-row: 1;
     width: 100%;
     max-width: 100%;
     min-width: 0;
@@ -1046,10 +1061,10 @@ a:focus-visible {
   }
 
   .password-reader-actions {
-    grid-column: 1;
-    grid-row: auto;
-    justify-content: flex-start;
-    width: 100%;
+    grid-column: 3;
+    grid-row: 1;
+    justify-content: flex-end;
+    width: auto;
   }
 
   .password-reader-field.is-multiline .password-reader-value {
