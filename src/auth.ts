@@ -431,8 +431,10 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 		const now = Date.now();
 		await env.DB.prepare(
 			`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
-			 VALUES (?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id_hash) DO NOTHING`
-		).bind(idHash, verified.vaultId, now, now, now, verified.exp * 1000).run();
+			 SELECT ?, ?, ?, ?, ?, ?, NULL
+			 WHERE (SELECT COUNT(*) FROM auth_sessions WHERE vault_id = ?) < ?
+			 ON CONFLICT(id_hash) DO NOTHING`
+		).bind(idHash, verified.vaultId, now, now, now, verified.exp * 1000, verified.vaultId, MAX_AUTH_DEVICE_RECORDS).run();
 	}
 	const row = await env.DB.prepare(
 		`SELECT last_activity_at, last_reauth_at, expires_at, revoked_at FROM auth_sessions WHERE id_hash = ? LIMIT 1`

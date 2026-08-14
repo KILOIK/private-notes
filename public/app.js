@@ -17,7 +17,7 @@ import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWo
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 import { getSettingsSurfaceState } from './settings-ui-state.js';
-import { getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from './totp-input.js';
+import { applyTotpInput, getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from './totp-input.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number, deleted_at?: number|null }} RawNote
@@ -983,18 +983,18 @@ function updateAuthDevicesPagination() {
 /** @param {string | null} cursor @param {boolean} [reset] */
 async function loadAuthDevices(cursor, reset) {
   if (state.authDevicesLoading) return;
-  if (reset) {
-    state.authDevicesCurrentCursor = null;
-    state.authDevicesPreviousCursors = [];
-    state.authDevicesNextCursor = null;
-  }
   state.authDevicesLoading = true;
   els.authDevicesList.setAttribute('aria-busy', 'true');
   updateAuthDevicesPagination();
   try {
     const data = await api('/api/auth/devices' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''));
     if (!Array.isArray(data.devices)) throw new Error('服务器返回的登录记录格式无效');
-    state.authDevicesCurrentCursor = cursor;
+    if (reset) {
+      state.authDevicesCurrentCursor = null;
+      state.authDevicesPreviousCursors = [];
+    } else {
+      state.authDevicesCurrentCursor = cursor;
+    }
     state.authDevicesNextCursor = typeof data.nextCursor === 'string' && data.nextCursor ? data.nextCursor : null;
     renderAuthDevices(data.devices);
   } finally {
@@ -2581,9 +2581,8 @@ els.vaultUnlockInput.addEventListener('keydown', function (event) {
 
 getTotpDigits().forEach(function (input, index) {
   input.addEventListener('input', function () {
-    const value = normalizeTotpInput(input.value);
-    input.value = value.slice(-1);
-    if (value) moveTotpFocus(getTotpDigits(), index, 1);
+    const digits = applyTotpInput(getTotpDigits(), index, input.value);
+    if (digits) moveTotpFocus(getTotpDigits(), Math.min(index + digits.length, getTotpDigits().length - 1), 0);
     submitTotpWhenComplete();
   });
   input.addEventListener('keydown', function (event) {
@@ -2594,10 +2593,7 @@ getTotpDigits().forEach(function (input, index) {
   });
   input.addEventListener('paste', function (event) {
     event.preventDefault();
-    const digits = normalizeTotpInput(event.clipboardData?.getData('text') || '');
-    getTotpDigits().forEach(function (target, targetIndex) {
-      if (targetIndex >= index && targetIndex - index < digits.length) target.value = digits[targetIndex - index];
-    });
+    const digits = applyTotpInput(getTotpDigits(), index, event.clipboardData?.getData('text') || '');
     moveTotpFocus(getTotpDigits(), Math.min(index + digits.length, getTotpDigits().length - 1), 0);
     submitTotpWhenComplete();
   });

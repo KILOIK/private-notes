@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from '../public/totp-input.js';
+import { applyTotpInput, getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from '../public/totp-input.js';
 
 describe('totp input helpers', () => {
 	it('normalizes pasted and typed values to at most six digits', () => {
@@ -11,6 +11,13 @@ describe('totp input helpers', () => {
 		expect(getCompleteTotpCode([{ value: '1' }, { value: '2' }, { value: '3' }, { value: '4' }, { value: '5' }, { value: '6' }])).toBe('123456');
 		expect(getCompleteTotpCode([{ value: '1' }, { value: '2' }, { value: '' }, { value: '4' }, { value: '5' }, { value: '6' }])).toBeNull();
 		expect(getCompleteTotpCode([{ value: '12' }, { value: '2' }, { value: '3' }, { value: '4' }, { value: '5' }, { value: '6' }])).toBeNull();
+	});
+
+	it('distributes a complete six-digit input event across the six code cells', () => {
+		const inputs = Array.from({ length: 6 }, () => ({ value: '' }));
+		expect(applyTotpInput(inputs, 0, '123456')).toBe('123456');
+		expect(inputs.map((input) => input.value).join('')).toBe('123456');
+		expect(getCompleteTotpCode(inputs)).toBe('123456');
 	});
 
 	it('moves focus one cell in the requested direction without leaving the range', () => {
