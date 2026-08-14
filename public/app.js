@@ -17,7 +17,7 @@ import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWo
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 import { getSettingsSurfaceState } from './settings-ui-state.js';
-import { moveTotpFocus, normalizeTotpInput } from './totp-input.js';
+import { getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from './totp-input.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number, deleted_at?: number|null }} RawNote
@@ -61,6 +61,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * attachmentDraft: ReturnType<typeof createAttachmentDraft>,
  * pendingLoginChallenge: string | null,
  * pendingLoginPassword: string,
+ * totpVerifying: boolean,
  * reauthRequired: boolean,
  * totpEnabled: boolean,
  * idleTimer: number | null,
@@ -122,6 +123,7 @@ const state = {
   attachmentDraft: createAttachmentDraft(),
   pendingLoginChallenge: null,
   pendingLoginPassword: '',
+  totpVerifying: false,
   reauthRequired: false,
   totpEnabled: false,
   idleTimer: null,
@@ -315,6 +317,15 @@ const els = {
 
 function getTotpDigits() {
   return /** @type {HTMLInputElement[]} */ (Array.from(els.totpInputs.querySelectorAll('[data-totp-index]')));
+}
+
+/** @param {boolean} pending */
+function setTotpVerificationPending(pending) {
+  els.totpVerifyBtn.disabled = pending;
+  els.totpBackBtn.disabled = pending;
+  els.totpRecoveryToggleBtn.disabled = pending;
+  els.totpRecoveryInput.disabled = pending;
+  getTotpDigits().forEach(function (input) { input.disabled = pending; });
 }
 
 /** @param {string} text */
@@ -703,6 +714,8 @@ function updateLoginMode() {
 
 function showTotpView() {
   state.authMode = 'totp';
+  state.totpVerifying = false;
+  setTotpVerificationPending(false);
   els.loginView.classList.add('hidden');
   els.totpView.classList.remove('hidden');
   els.appView.classList.add('app-dimmed');
@@ -1219,6 +1232,8 @@ function applySearch() {
 
 function showLogin() {
   state.authMode = state.sessionAuthenticated ? 'unlock' : 'login';
+  state.totpVerifying = false;
+  setTotpVerificationPending(false);
   els.loginView.classList.remove('hidden');
   els.totpView.classList.add('hidden');
   els.appView.classList.add('app-dimmed');
@@ -2306,21 +2321,37 @@ function getPendingTotpCode() {
 
 async function verifyPendingTotp() {
   if (!state.pendingLoginChallenge || !state.pendingLoginPassword) throw new Error('二次验证挑战已失效，请重新登录');
-  const code = getPendingTotpCode();
-  const data = await api('/api/login/totp', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })
+  if (state.totpVerifying) return;
+  state.totpVerifying = true;
+  setTotpVerificationPending(true);
+  try {
+    const code = getPendingTotpCode();
+    const data = await api('/api/login/totp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })
+    });
+    if (!data.ok) throw new Error('验证码无效');
+    const password = state.pendingLoginPassword;
+    state.pendingLoginChallenge = null;
+    state.pendingLoginPassword = '';
+    state.sessionAuthenticated = true;
+    await unlockVault(password, true);
+    clearSensitiveInputs();
+    showApp();
+    setStatus('已通过 Authenticator 验证');
+  } finally {
+    state.totpVerifying = false;
+    setTotpVerificationPending(false);
+  }
+}
+
+function submitTotpWhenComplete() {
+  if (!els.totpRecoveryPanel.classList.contains('hidden')) return;
+  if (!getCompleteTotpCode(getTotpDigits())) return;
+  verifyPendingTotp().catch(function (error) {
+    els.totpStatus.textContent = error instanceof Error ? error.message : '验证码无效';
   });
-  if (!data.ok) throw new Error('验证码无效');
-  const password = state.pendingLoginPassword;
-  state.pendingLoginChallenge = null;
-  state.pendingLoginPassword = '';
-  state.sessionAuthenticated = true;
-  await unlockVault(password, true);
-  clearSensitiveInputs();
-  showApp();
-  setStatus('已通过 Authenticator 验证');
 }
 
 async function enrollTotp() {
@@ -2477,6 +2508,7 @@ getTotpDigits().forEach(function (input, index) {
     const value = normalizeTotpInput(input.value);
     input.value = value.slice(-1);
     if (value) moveTotpFocus(getTotpDigits(), index, 1);
+    submitTotpWhenComplete();
   });
   input.addEventListener('keydown', function (event) {
     if (event.key === 'Backspace' && !input.value) moveTotpFocus(getTotpDigits(), index, -1);
@@ -2491,6 +2523,7 @@ getTotpDigits().forEach(function (input, index) {
       if (targetIndex >= index && targetIndex - index < digits.length) target.value = digits[targetIndex - index];
     });
     moveTotpFocus(getTotpDigits(), Math.min(index + digits.length, getTotpDigits().length - 1), 0);
+    submitTotpWhenComplete();
   });
 });
 els.totpRecoveryToggleBtn.onclick = function () {
