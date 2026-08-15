@@ -61,6 +61,7 @@ export function clearDecryptedFolderState(state, editorFolder) {
  *   totpEnabled: boolean,
  *   pendingLoginChallenge: string | null,
  *   pendingLoginPassword: string,
+ *   pendingAuthMode: 'login' | 'reauth' | null,
  *   unlockError: string
  * }} state
  */
@@ -74,5 +75,6 @@ export function clearSessionAuthState(state) {
   state.totpEnabled = false;
   state.pendingLoginChallenge = null;
   state.pendingLoginPassword = '';
+  state.pendingAuthMode = null;
   state.unlockError = '';
 }

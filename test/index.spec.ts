@@ -320,6 +320,12 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain('els.settingsBackdrop.onclick = closeSettings;');
 		expect(appScript).toContain('if (state.vaultUnlocked) scheduleIdleLock();');
 		expect(appScript).toContain("function showTotpView()");
+		expect(appScript).toContain('shouldPreserveSessionOnUnauthorized');
+		expect(appScript).not.toContain("window.prompt('请输入 Authenticator 当前验证码或恢复码')");
+		expect(appScript).toContain("state.pendingAuthMode = 'reauth'");
+		expect(appScript).toContain("if (state.pendingAuthMode === 'reauth')");
+		expect(appScript).toContain("if (!state.totpEnabled)");
+		expect(appScript).toContain("els.loginStatus.textContent = '';");
 		expect(appScript).toContain("normalizeTotpInput");
 		expect(appScript).toContain("body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })");
 		expect(appScript).not.toContain("localStorage.setItem('pendingLoginChallenge'");
@@ -385,6 +391,18 @@ describe('private-notes worker', () => {
 		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(Date.now() - 301_000).run();
 		const session = await api('/api/session', { headers: { cookie } });
 		expect(await jsonBody(session)).toMatchObject({ authenticated: true, reauthRequired: true });
+	});
+
+	it('reports authenticator state while an authenticated session needs reauthentication', async () => {
+		const { cookie } = await login();
+		await env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?)').bind('totp_enabled', '1').run();
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(Date.now() - 30 * 60 * 1000 - 1).run();
+
+		await expect(jsonBody(await api('/api/session', { headers: { cookie } }))).resolves.toMatchObject({
+			authenticated: true,
+			reauthRequired: true,
+			totpEnabled: true,
+		});
 	});
 
 	it('records authenticated device metadata and omits session secrets from the device list', async () => {

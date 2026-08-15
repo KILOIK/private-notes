@@ -651,7 +651,13 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 
 	if (url.pathname === '/api/session' && request.method === 'GET') {
 		const session = await getSession(request, env);
-		return json({ ok: true, authenticated: session.authenticated, vaultId: session.vaultId, reauthRequired: session.reauthRequired });
+		return json({
+			ok: true,
+			authenticated: session.authenticated,
+			vaultId: session.vaultId,
+			reauthRequired: session.reauthRequired,
+			totpEnabled: session.authenticated ? await isTotpEnabled(env) : false,
+		});
 	}
 
 	if (url.pathname === '/api/public-config' && request.method === 'GET') {

@@ -18,6 +18,7 @@ import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 import { getSettingsSurfaceState } from './settings-ui-state.js';
 import { moveTotpFocus, normalizeTotpInput } from './totp-input.js';
+import { shouldPreserveSessionOnUnauthorized } from './auth-request.js';
 
 /**
  * @typedef {{ id: string, title: string, content: string, created_at: number, updated_at: number, revision: number, deleted_at?: number|null }} RawNote
@@ -61,6 +62,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * attachmentDraft: ReturnType<typeof createAttachmentDraft>,
  * pendingLoginChallenge: string | null,
  * pendingLoginPassword: string,
+ * pendingAuthMode: 'login' | 'reauth' | null,
  * reauthRequired: boolean,
  * totpEnabled: boolean,
  * idleTimer: number | null,
@@ -122,6 +124,7 @@ const state = {
   attachmentDraft: createAttachmentDraft(),
   pendingLoginChallenge: null,
   pendingLoginPassword: '',
+  pendingAuthMode: null,
   reauthRequired: false,
   totpEnabled: false,
   idleTimer: null,
@@ -1335,8 +1338,11 @@ async function api(url, options, behavior) {
       lockVault('reauth_required');
       throw new Error('需要重新验证');
     }
-    endSession();
-    throw new Error('请先登录');
+    if (!shouldPreserveSessionOnUnauthorized(url)) {
+      endSession();
+      throw new Error('请先登录');
+    }
+    throw new Error('验证失败');
   }
   if (!res.ok) {
     if (res.status === 409 && data.error === 'revision_conflict') {
@@ -2296,6 +2302,7 @@ async function beginTwoFactorLogin(password) {
   if (data.code !== 'two_factor_required' || typeof data.challengeId !== 'string') throw new Error('服务器未返回有效的二次验证挑战');
   state.pendingLoginChallenge = data.challengeId;
   state.pendingLoginPassword = password;
+  state.pendingAuthMode = 'login';
   showTotpView();
 }
 
@@ -2305,17 +2312,26 @@ function getPendingTotpCode() {
 }
 
 async function verifyPendingTotp() {
-  if (!state.pendingLoginChallenge || !state.pendingLoginPassword) throw new Error('二次验证挑战已失效，请重新登录');
+  if (!state.pendingAuthMode || !state.pendingLoginPassword) throw new Error('二次验证挑战已失效，请重新登录');
   const code = getPendingTotpCode();
+  const password = state.pendingLoginPassword;
+  if (state.pendingAuthMode === 'reauth') {
+    await submitReauth(password, code);
+    state.pendingLoginPassword = '';
+    state.pendingAuthMode = null;
+    clearSensitiveInputs();
+    return;
+  }
+  if (!state.pendingLoginChallenge) throw new Error('二次验证挑战已失效，请重新登录');
   const data = await api('/api/login/totp', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })
   });
   if (!data.ok) throw new Error('验证码无效');
-  const password = state.pendingLoginPassword;
   state.pendingLoginChallenge = null;
   state.pendingLoginPassword = '';
+  state.pendingAuthMode = null;
   state.sessionAuthenticated = true;
   await unlockVault(password, true);
   clearSensitiveInputs();
@@ -2391,10 +2407,17 @@ async function checkSession() {
   if (data.authenticated) {
     state.sessionAuthenticated = true;
     state.reauthRequired = Boolean(data.reauthRequired);
+    state.totpEnabled = Boolean(data.totpEnabled);
     state.vaultUnlocked = false;
     state.vaultKey = null;
     state.unlockError = '';
-    await refreshMeta();
+    if (!state.reauthRequired) {
+      await refreshMeta();
+    } else {
+      state.noteCountMeta = 0;
+      updateTotpUi();
+      updateVaultUi();
+    }
     state.authMode = 'unlock';
     showLogin();
     renderList();
@@ -2430,14 +2453,20 @@ els.loginBtn.onclick = async function () {
       if (loginData.code === 'two_factor_required') {
         state.pendingLoginChallenge = String(loginData.challengeId || '');
         state.pendingLoginPassword = password;
+        state.pendingAuthMode = 'login';
         showTotpView();
         return;
       }
       performedLogin = true;
     } else if (state.reauthRequired) {
-      const code = window.prompt('请输入 Authenticator 当前验证码或恢复码') || '';
-      await submitReauth(password, code);
-      clearSensitiveInputs();
+      if (!state.totpEnabled) {
+        await submitReauth(password, '');
+        clearSensitiveInputs();
+        return;
+      }
+      state.pendingLoginPassword = password;
+      state.pendingAuthMode = 'reauth';
+      showTotpView();
       return;
     }
     state.sessionAuthenticated = true;
@@ -2503,6 +2532,8 @@ els.totpRecoveryToggleBtn.onclick = function () {
 els.totpBackBtn.onclick = function () {
   state.pendingLoginChallenge = null;
   state.pendingLoginPassword = '';
+  state.pendingAuthMode = null;
+  els.loginStatus.textContent = '';
   showLogin();
 };
 els.totpVerifyBtn.onclick = function () {

@@ -116,6 +116,7 @@ describe('sensitive UI state', () => {
 			totpEnabled: true,
 			pendingLoginChallenge: 'challenge',
 			pendingLoginPassword: 'password',
+			pendingAuthMode: 'login' as const,
 			unlockError: 'error',
 		};
 
@@ -131,6 +132,7 @@ describe('sensitive UI state', () => {
 			totpEnabled: false,
 			pendingLoginChallenge: null,
 			pendingLoginPassword: '',
+			pendingAuthMode: null,
 			unlockError: '',
 		});
 	});
