@@ -11,6 +11,8 @@ export const SESSION_COOKIE_NAME = '__Host-session';
 export const MAX_PASSWORD_LENGTH = 1024;
 export const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
 export const SESSION_IDLE_TIMEOUT_OPTIONS = [300, 900, 1800, 3600, 14400] as const;
+export const MAX_AUTH_DEVICE_RECORDS = 100;
+export const AUTH_DEVICE_PAGE_SIZE = 10;
 
 export type LoginBranding = { title: string; description: string };
 export type AuthSettings = { login: LoginBranding; idleTimeoutSeconds: number };
@@ -57,6 +59,11 @@ export type SessionDeviceMetadata = {
 	deviceLabel: string;
 	userAgent: string;
 	loginIp: string;
+};
+
+export type AuthDeviceCursor = {
+	loginAt: number;
+	idHash: string;
 };
 
 type VerifiedToken = { vaultId: string; sessionId: string | null; legacy: boolean; exp: number };
@@ -352,6 +359,7 @@ export async function createSessionToken(
 			metadata ? nowMs : null
 		)
 		.run();
+	await trimAuthSessions(env, normalizedVaultId);
 	const payload = base64UrlEncode(
 		JSON.stringify({
 			v: 3,
@@ -423,8 +431,10 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 		const now = Date.now();
 		await env.DB.prepare(
 			`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at)
-			 VALUES (?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(id_hash) DO NOTHING`
-		).bind(idHash, verified.vaultId, now, now, now, verified.exp * 1000).run();
+			 SELECT ?, ?, ?, ?, ?, ?, NULL
+			 WHERE (SELECT COUNT(*) FROM auth_sessions WHERE vault_id = ?) < ?
+			 ON CONFLICT(id_hash) DO NOTHING`
+		).bind(idHash, verified.vaultId, now, now, now, verified.exp * 1000, verified.vaultId, MAX_AUTH_DEVICE_RECORDS).run();
 	}
 	const row = await env.DB.prepare(
 		`SELECT last_activity_at, last_reauth_at, expires_at, revoked_at FROM auth_sessions WHERE id_hash = ? LIMIT 1`
@@ -465,29 +475,85 @@ export function getSessionDeviceMetadata(request: Request): SessionDeviceMetadat
 	return { deviceLabel, userAgent, loginIp: getClientIp(request) };
 }
 
-export async function listAuthDevices(env: AuthEnv, vaultId: string, currentSessionId: string | null) {
-	const currentHash = currentSessionId ? await hashOpaque(currentSessionId) : null;
-	const result = await env.DB.prepare(
-		 `SELECT id_hash, device_label, user_agent, login_ip, login_at, last_activity_at
-		 FROM auth_sessions
+async function trimAuthSessions(env: AuthEnv, vaultId: string) {
+	const normalizedVaultId = normalizeVaultId(vaultId);
+	await env.DB.prepare(
+		`DELETE FROM auth_sessions
 		 WHERE vault_id = ?
-		 ORDER BY COALESCE(login_at, created_at) DESC, id_hash DESC`
-	).bind(normalizeVaultId(vaultId)).all<{
+		   AND id_hash NOT IN (
+			 SELECT id_hash FROM auth_sessions
+			 WHERE vault_id = ?
+			 ORDER BY COALESCE(login_at, created_at) DESC, id_hash DESC
+			 LIMIT ?
+		   )`
+	)
+		.bind(normalizedVaultId, normalizedVaultId, MAX_AUTH_DEVICE_RECORDS)
+		.run();
+}
+
+export async function listAuthDevices(
+	env: AuthEnv,
+	vaultId: string,
+	currentSessionId: string | null,
+	cursor: AuthDeviceCursor | null,
+	limit: number
+) {
+	const currentHash = currentSessionId ? await hashOpaque(currentSessionId) : null;
+	const normalizedVaultId = normalizeVaultId(vaultId);
+	const normalizedLimit = Math.max(1, Math.min(AUTH_DEVICE_PAGE_SIZE, limit));
+	const query = cursor
+		? env.DB.prepare(
+			`WITH recent_sessions AS (
+				SELECT id_hash, device_label, user_agent, login_ip,
+					COALESCE(login_at, created_at) AS login_at, last_activity_at
+				FROM auth_sessions
+				WHERE vault_id = ?
+				ORDER BY COALESCE(login_at, created_at) DESC, id_hash DESC
+				LIMIT ?
+			)
+			SELECT id_hash, device_label, user_agent, login_ip, login_at, last_activity_at
+			FROM recent_sessions
+			WHERE login_at < ? OR (login_at = ? AND id_hash < ?)
+			ORDER BY login_at DESC, id_hash DESC
+			LIMIT ?`
+		).bind(normalizedVaultId, MAX_AUTH_DEVICE_RECORDS, cursor.loginAt, cursor.loginAt, cursor.idHash, normalizedLimit + 1)
+		: env.DB.prepare(
+			`WITH recent_sessions AS (
+				SELECT id_hash, device_label, user_agent, login_ip,
+					COALESCE(login_at, created_at) AS login_at, last_activity_at
+				FROM auth_sessions
+				WHERE vault_id = ?
+				ORDER BY COALESCE(login_at, created_at) DESC, id_hash DESC
+				LIMIT ?
+			)
+			SELECT id_hash, device_label, user_agent, login_ip, login_at, last_activity_at
+			FROM recent_sessions
+			ORDER BY login_at DESC, id_hash DESC
+			LIMIT ?`
+		).bind(normalizedVaultId, MAX_AUTH_DEVICE_RECORDS, normalizedLimit + 1);
+	const result = await query.all<{
 		id_hash: string;
 		device_label: string | null;
 		user_agent: string | null;
 		login_ip: string | null;
-		login_at: number | null;
+		login_at: number;
 		last_activity_at: number;
 	}>();
-	return (result.results ?? []).map((row) => ({
+	const rows = result.results ?? [];
+	const hasMore = rows.length > normalizedLimit;
+	const devices = (hasMore ? rows.slice(0, normalizedLimit) : rows).map((row) => ({
 		deviceLabel: row.device_label || '未知设备',
 		userAgent: row.user_agent || '未知客户端',
 		loginIp: row.login_ip || 'unknown',
-		loginAt: row.login_at ?? null,
+		loginAt: row.login_at,
 		lastActivityAt: row.last_activity_at,
 		current: currentHash === row.id_hash,
 	}));
+	const last = hasMore ? rows[normalizedLimit - 1] : null;
+	return {
+		devices,
+		nextCursor: last ? { loginAt: last.login_at, idHash: last.id_hash } : null,
+	};
 }
 
 async function getLoginRateLimitKey(request: Request, env: AuthEnv) {

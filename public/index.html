@@ -141,6 +141,11 @@
           <section id="authDevicesSection" class="settings-form-section" aria-labelledby="authDevicesTitle">
             <h3 id="authDevicesTitle" class="settings-section-title">登录设备</h3>
             <div id="authDevicesList" class="auth-devices-list" aria-live="polite"><div class="field-help">正在读取登录记录…</div></div>
+            <div id="authDevicesPagination" class="auth-devices-pagination hidden" aria-label="登录记录分页">
+              <button id="authDevicesPreviousBtn" class="btn secondary" type="button">上一页</button>
+              <span id="authDevicesPageLabel" class="field-help" aria-live="polite">第 1 页</span>
+              <button id="authDevicesNextBtn" class="btn secondary" type="button">下一页</button>
+            </div>
           </section>
           <button id="settingsLogoutBtn" class="btn danger settings-logout" type="button">退出登录</button>
         </aside>

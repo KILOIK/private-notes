@@ -17,7 +17,7 @@ import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWo
 import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 import { getSettingsSurfaceState } from './settings-ui-state.js';
-import { moveTotpFocus, normalizeTotpInput } from './totp-input.js';
+import { applyTotpInput, getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from './totp-input.js';
 import { shouldPreserveSessionOnUnauthorized } from './auth-request.js';
 
 /**
@@ -63,6 +63,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * pendingLoginChallenge: string | null,
  * pendingLoginPassword: string,
  * pendingAuthMode: 'login' | 'reauth' | null,
+ * totpVerifying: boolean,
  * reauthRequired: boolean,
  * totpEnabled: boolean,
  * idleTimer: number | null,
@@ -87,6 +88,10 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * listScrollTop: number
  * hasListScrollSnapshot: boolean
  * settingsReturnFocus: HTMLElement | null
+ * authDevicesCurrentCursor: string | null
+ * authDevicesPreviousCursors: Array<string | null>
+ * authDevicesNextCursor: string | null
+ * authDevicesLoading: boolean
  * folderReturnFocus: HTMLElement | null
  * editingFolderId: string | null
  * }} */
@@ -125,6 +130,7 @@ const state = {
   pendingLoginChallenge: null,
   pendingLoginPassword: '',
   pendingAuthMode: null,
+  totpVerifying: false,
   reauthRequired: false,
   totpEnabled: false,
   idleTimer: null,
@@ -149,6 +155,10 @@ const state = {
   listScrollTop: 0,
   hasListScrollSnapshot: false,
   settingsReturnFocus: null,
+  authDevicesCurrentCursor: null,
+  authDevicesPreviousCursors: [],
+  authDevicesNextCursor: null,
+  authDevicesLoading: false,
   folderReturnFocus: null,
   editingFolderId: null
 };
@@ -216,6 +226,10 @@ const els = {
   saveAuthSettingsBtn: getButton('saveAuthSettingsBtn'),
   authSettingsStatus: getElement('authSettingsStatus'),
   authDevicesList: getElement('authDevicesList'),
+  authDevicesPagination: getElement('authDevicesPagination'),
+  authDevicesPreviousBtn: getButton('authDevicesPreviousBtn'),
+  authDevicesPageLabel: getElement('authDevicesPageLabel'),
+  authDevicesNextBtn: getButton('authDevicesNextBtn'),
   topbar: getElement('topbar'),
   searchInput: getInput('searchInput'),
   clearSearchBtn: getButton('clearSearchBtn'),
@@ -318,6 +332,15 @@ const els = {
 
 function getTotpDigits() {
   return /** @type {HTMLInputElement[]} */ (Array.from(els.totpInputs.querySelectorAll('[data-totp-index]')));
+}
+
+/** @param {boolean} pending */
+function setTotpVerificationPending(pending) {
+  els.totpVerifyBtn.disabled = pending;
+  els.totpBackBtn.disabled = pending;
+  els.totpRecoveryToggleBtn.disabled = pending;
+  els.totpRecoveryInput.disabled = pending;
+  getTotpDigits().forEach(function (input) { input.disabled = pending; });
 }
 
 /** @param {string} text */
@@ -474,8 +497,8 @@ function openSettings() {
   loadAuthSettings().catch(function (error) {
     els.authSettingsStatus.textContent = error instanceof Error ? error.message : '读取登录设置失败';
   });
-  loadAuthDevices().catch(function (error) {
-    els.authDevicesList.textContent = error instanceof Error ? error.message : '读取登录记录失败';
+  loadAuthDevices(null, true).catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取登录记录失败');
   });
 }
 
@@ -706,6 +729,8 @@ function updateLoginMode() {
 
 function showTotpView() {
   state.authMode = 'totp';
+  state.totpVerifying = false;
+  setTotpVerificationPending(false);
   els.loginView.classList.add('hidden');
   els.totpView.classList.remove('hidden');
   els.appView.classList.add('app-dimmed');
@@ -950,10 +975,74 @@ function renderAuthDevices(devices) {
   });
 }
 
-async function loadAuthDevices() {
-  const data = await api('/api/auth/devices');
-  renderAuthDevices(data.devices);
+function updateAuthDevicesPagination() {
+  const visible = state.authDevicesPreviousCursors.length > 0 || Boolean(state.authDevicesNextCursor);
+  els.authDevicesPagination.classList.toggle('hidden', !visible);
+  els.authDevicesPageLabel.textContent = '第 ' + (state.authDevicesPreviousCursors.length + 1) + ' 页';
+  els.authDevicesPreviousBtn.disabled = state.authDevicesLoading || state.authDevicesPreviousCursors.length === 0;
+  els.authDevicesNextBtn.disabled = state.authDevicesLoading || !state.authDevicesNextCursor;
 }
+
+/** @param {string | null} cursor @param {boolean} [reset] */
+async function loadAuthDevices(cursor, reset) {
+  if (state.authDevicesLoading) return;
+  state.authDevicesLoading = true;
+  els.authDevicesList.setAttribute('aria-busy', 'true');
+  updateAuthDevicesPagination();
+  try {
+    const data = await api('/api/auth/devices' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''));
+    if (!Array.isArray(data.devices)) throw new Error('服务器返回的登录记录格式无效');
+    if (reset) {
+      state.authDevicesCurrentCursor = null;
+      state.authDevicesPreviousCursors = [];
+    } else {
+      state.authDevicesCurrentCursor = cursor;
+    }
+    state.authDevicesNextCursor = typeof data.nextCursor === 'string' && data.nextCursor ? data.nextCursor : null;
+    renderAuthDevices(data.devices);
+  } finally {
+    state.authDevicesLoading = false;
+    els.authDevicesList.removeAttribute('aria-busy');
+    updateAuthDevicesPagination();
+  }
+}
+
+async function loadNextAuthDevices() {
+  if (!state.authDevicesNextCursor || state.authDevicesLoading) return;
+  const cursor = state.authDevicesNextCursor;
+  state.authDevicesPreviousCursors.push(state.authDevicesCurrentCursor);
+  try {
+    await loadAuthDevices(cursor);
+  } catch (error) {
+    state.authDevicesPreviousCursors.pop();
+    updateAuthDevicesPagination();
+    throw error;
+  }
+}
+
+async function loadPreviousAuthDevices() {
+  if (state.authDevicesPreviousCursors.length === 0 || state.authDevicesLoading) return;
+  const cursor = state.authDevicesPreviousCursors.pop();
+  if (cursor === undefined) return;
+  try {
+    await loadAuthDevices(cursor);
+  } catch (error) {
+    state.authDevicesPreviousCursors.push(cursor);
+    updateAuthDevicesPagination();
+    throw error;
+  }
+}
+
+els.authDevicesNextBtn.onclick = function () {
+  loadNextAuthDevices().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取下一页登录记录失败');
+  });
+};
+els.authDevicesPreviousBtn.onclick = function () {
+  loadPreviousAuthDevices().catch(function (error) {
+    setStatus(error instanceof Error ? error.message : '读取上一页登录记录失败');
+  });
+};
 
 /**
  * @param {string} passphrase
@@ -1222,6 +1311,8 @@ function applySearch() {
 
 function showLogin() {
   state.authMode = state.sessionAuthenticated ? 'unlock' : 'login';
+  state.totpVerifying = false;
+  setTotpVerificationPending(false);
   els.loginView.classList.remove('hidden');
   els.totpView.classList.add('hidden');
   els.appView.classList.add('app-dimmed');
@@ -2313,30 +2404,46 @@ function getPendingTotpCode() {
 
 async function verifyPendingTotp() {
   if (!state.pendingAuthMode || !state.pendingLoginPassword) throw new Error('二次验证挑战已失效，请重新登录');
-  const code = getPendingTotpCode();
-  const password = state.pendingLoginPassword;
-  if (state.pendingAuthMode === 'reauth') {
-    await submitReauth(password, code);
+  if (state.totpVerifying) return;
+  state.totpVerifying = true;
+  setTotpVerificationPending(true);
+  try {
+    const code = getPendingTotpCode();
+    const password = state.pendingLoginPassword;
+    if (state.pendingAuthMode === 'reauth') {
+      await submitReauth(password, code);
+      state.pendingLoginPassword = '';
+      state.pendingAuthMode = null;
+      clearSensitiveInputs();
+      return;
+    }
+    if (!state.pendingLoginChallenge) throw new Error('二次验证挑战已失效，请重新登录');
+    const data = await api('/api/login/totp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })
+    });
+    if (!data.ok) throw new Error('验证码无效');
+    state.pendingLoginChallenge = null;
     state.pendingLoginPassword = '';
     state.pendingAuthMode = null;
+    state.sessionAuthenticated = true;
+    await unlockVault(password, true);
     clearSensitiveInputs();
-    return;
+    showApp();
+    setStatus('已通过 Authenticator 验证');
+  } finally {
+    state.totpVerifying = false;
+    setTotpVerificationPending(false);
   }
-  if (!state.pendingLoginChallenge) throw new Error('二次验证挑战已失效，请重新登录');
-  const data = await api('/api/login/totp', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ challengeId: state.pendingLoginChallenge, code: code })
+}
+
+function submitTotpWhenComplete() {
+  if (!els.totpRecoveryPanel.classList.contains('hidden')) return;
+  if (!getCompleteTotpCode(getTotpDigits())) return;
+  verifyPendingTotp().catch(function (error) {
+    els.totpStatus.textContent = error instanceof Error ? error.message : '验证码无效';
   });
-  if (!data.ok) throw new Error('验证码无效');
-  state.pendingLoginChallenge = null;
-  state.pendingLoginPassword = '';
-  state.pendingAuthMode = null;
-  state.sessionAuthenticated = true;
-  await unlockVault(password, true);
-  clearSensitiveInputs();
-  showApp();
-  setStatus('已通过 Authenticator 验证');
 }
 
 async function enrollTotp() {
@@ -2503,9 +2610,9 @@ els.vaultUnlockInput.addEventListener('keydown', function (event) {
 
 getTotpDigits().forEach(function (input, index) {
   input.addEventListener('input', function () {
-    const value = normalizeTotpInput(input.value);
-    input.value = value.slice(-1);
-    if (value) moveTotpFocus(getTotpDigits(), index, 1);
+    const digits = applyTotpInput(getTotpDigits(), index, input.value);
+    if (digits) moveTotpFocus(getTotpDigits(), Math.min(index + digits.length, getTotpDigits().length - 1), 0);
+    submitTotpWhenComplete();
   });
   input.addEventListener('keydown', function (event) {
     if (event.key === 'Backspace' && !input.value) moveTotpFocus(getTotpDigits(), index, -1);
@@ -2515,11 +2622,9 @@ getTotpDigits().forEach(function (input, index) {
   });
   input.addEventListener('paste', function (event) {
     event.preventDefault();
-    const digits = normalizeTotpInput(event.clipboardData?.getData('text') || '');
-    getTotpDigits().forEach(function (target, targetIndex) {
-      if (targetIndex >= index && targetIndex - index < digits.length) target.value = digits[targetIndex - index];
-    });
+    const digits = applyTotpInput(getTotpDigits(), index, event.clipboardData?.getData('text') || '');
     moveTotpFocus(getTotpDigits(), Math.min(index + digits.length, getTotpDigits().length - 1), 0);
+    submitTotpWhenComplete();
   });
 });
 els.totpRecoveryToggleBtn.onclick = function () {

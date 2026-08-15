@@ -124,46 +124,38 @@ export function renderPasswordReader(container, record, clipboard, onStatus) {
     label.textContent = display.label;
     wrapper.append(label);
 
-    const value = document.createElement(display.multiline ? 'pre' : 'div');
+    const value = document.createElement('button');
+    value.type = 'button';
     value.className = 'password-reader-value';
     value.textContent = display.hidden ? '•'.repeat(Math.max(8, Array.from(display.value).length)) : display.value;
-    value.setAttribute('aria-label', display.label);
+    value.setAttribute('aria-label', '复制' + display.label);
+    value.setAttribute('title', '点击复制');
+    value.onclick = function () {
+      copyFieldValue(display.value, clipboard)
+        .then(function () { onStatus('字段已复制'); })
+        .catch(function () { onStatus('复制失败，请检查剪贴板权限'); });
+    };
     wrapper.append(value);
 
-    const actions = document.createElement('div');
-    actions.className = 'password-reader-actions';
-
     if (display.hidden) {
+      const actions = document.createElement('div');
+      actions.className = 'password-reader-actions';
       let hidden = true;
       const visibility = document.createElement('button');
       visibility.type = 'button';
-      visibility.className = 'icon-btn password-field-action';
-      visibility.textContent = '显示';
+      visibility.className = 'icon-btn password-field-action password-visibility-toggle';
+      visibility.textContent = '';
       visibility.setAttribute('aria-label', '显示密码');
       visibility.setAttribute('title', '显示密码');
       visibility.onclick = function () {
         hidden = !hidden;
         value.textContent = hidden ? '•'.repeat(Math.max(8, Array.from(display.value).length)) : display.value;
-        visibility.textContent = hidden ? '显示' : '隐藏';
         visibility.setAttribute('aria-label', hidden ? '显示密码' : '隐藏密码');
         visibility.setAttribute('title', hidden ? '显示密码' : '隐藏密码');
       };
       actions.append(visibility);
+      wrapper.append(actions);
     }
-
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'icon-btn password-field-copy';
-    copy.textContent = '复制';
-    copy.setAttribute('aria-label', '复制' + display.label);
-    copy.setAttribute('title', '复制');
-    copy.onclick = function () {
-      copyFieldValue(display.value, clipboard)
-        .then(function () { onStatus('字段已复制'); })
-        .catch(function () { onStatus('复制失败，请检查剪贴板权限'); });
-    };
-    actions.append(copy);
-    wrapper.append(actions);
     container.append(wrapper);
   });
 }

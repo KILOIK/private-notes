@@ -2,11 +2,12 @@ import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { decryptSharedPayload, encryptSharedPayload, parseShareKeyFragment } from '../public/share-crypto.js';
 import worker from '../src';
-import { resolveCookieSecret } from '../src/auth';
+import { getCredentialFingerprintForVault, resolveCookieSecret } from '../src/auth';
 
 const ORIGIN = 'https://example.com';
 const DEFAULT_PASSWORD = 'test-default-password-with-strong-entropy';
 const GUEST_PASSWORD = 'test-guest-password-with-strong-entropy';
+const COOKIE_SECRET = 'test-cookie-secret-with-at-least-32-random-characters';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -22,6 +23,34 @@ function encryptedValueWithDataBytes(byteLength: number) {
 
 function cookieFrom(response: Response) {
 	return (response.headers.get('set-cookie') || '').split(';', 1)[0];
+}
+
+function base64UrlEncode(value: string | Uint8Array) {
+	const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+	let binary = '';
+	for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function legacySessionCookie(exp = Math.floor(Date.now() / 1000) + 3600) {
+	const payload = base64UrlEncode(
+		JSON.stringify({
+			v: 2,
+			vaultId: 'default',
+			credential: await getCredentialFingerprintForVault(env, 'default'),
+			iat: Math.floor(Date.now() / 1000),
+			exp,
+		})
+	);
+	const key = await crypto.subtle.importKey(
+		'raw',
+		new TextEncoder().encode(COOKIE_SECRET),
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		['sign']
+	);
+	const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+	return `__Host-session=${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
 }
 
 async function api(path: string, init?: RequestInit) {
@@ -452,6 +481,152 @@ describe('private-notes worker', () => {
 		expect(firstCookie).not.toBe(secondCookie);
 	});
 
+	it('retains only the newest 100 sessions and pages the device history', async () => {
+		const first = await login(DEFAULT_PASSWORD, '203.0.113.10');
+		await env.DB.prepare('UPDATE auth_sessions SET login_at = 0 WHERE login_ip = ?').bind('203.0.113.10').run();
+		for (let index = 1; index <= 100; index += 1) {
+			await env.DB.prepare(
+				`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at, login_ip, login_at)
+				 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+			)
+				.bind(
+					String(index).padStart(43, 'a'),
+					'default',
+					index,
+					index,
+					index,
+					Date.now() + 1_000_000,
+					`198.51.100.${index}`,
+					index
+				)
+				.run();
+		}
+
+		const newest = await login(DEFAULT_PASSWORD, '203.0.113.250');
+		const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(count?.count).toBe(100);
+		await expect(jsonBody(await api('/api/session', { headers: { cookie: first.cookie } }))).resolves.toMatchObject({ authenticated: false });
+		await expect(jsonBody(await api('/api/session', { headers: { cookie: newest.cookie } }))).resolves.toMatchObject({ authenticated: true });
+
+		const firstPage = await jsonBody(await api('/api/auth/devices', { headers: { cookie: newest.cookie } }));
+		expect(firstPage.devices).toHaveLength(10);
+		expect(typeof firstPage.nextCursor).toBe('string');
+		const secondPage = await jsonBody(
+			await api(`/api/auth/devices?cursor=${encodeURIComponent(String(firstPage.nextCursor))}`, { headers: { cookie: newest.cookie } })
+		);
+		expect(secondPage.devices).toHaveLength(10);
+		const firstIps = (firstPage.devices as JsonRecord[]).map((device) => device.loginIp);
+		const secondIps = (secondPage.devices as JsonRecord[]).map((device) => device.loginIp);
+		expect(new Set([...firstIps, ...secondIps]).size).toBe(20);
+	});
+
+	it('keeps legacy v2 sessions compatible while the vault has room for them', async () => {
+		const cookie = await legacySessionCookie();
+		const before = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(before?.count).toBe(0);
+
+		await expect(jsonBody(await api('/api/session', { headers: { cookie } }))).resolves.toMatchObject({ authenticated: true });
+		const after = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(after?.count).toBe(1);
+	});
+
+	it('does not resurrect a trimmed legacy v2 session when the vault is at the 100-record cap', async () => {
+		for (let index = 1; index <= 100; index += 1) {
+			await env.DB.prepare(
+				`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at, login_ip, login_at)
+				 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+			)
+				.bind(
+					String(index).padStart(43, 'b'),
+					'default',
+					index,
+					index,
+					index,
+					Date.now() + 1_000_000,
+					`198.51.100.${index}`,
+					index
+				)
+				.run();
+		}
+		const cookie = await legacySessionCookie();
+
+		await expect(jsonBody(await api('/api/session', { headers: { cookie } }))).resolves.toMatchObject({ authenticated: false });
+		const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(count?.count).toBe(100);
+	});
+
+	it('keeps the 100-record cap when legacy v2 sessions import concurrently', async () => {
+		for (let index = 1; index <= 99; index += 1) {
+			await env.DB.prepare(
+				`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at, login_ip, login_at)
+				 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+			)
+				.bind(
+					String(index).padStart(43, 'c'),
+					'default',
+					index,
+					index,
+					index,
+					Date.now() + 1_000_000,
+					`198.51.100.${index}`,
+					index
+				)
+				.run();
+		}
+		const firstCookie = await legacySessionCookie(Math.floor(Date.now() / 1000) + 3600);
+		const secondCookie = await legacySessionCookie(Math.floor(Date.now() / 1000) + 3601);
+
+		const responses = await Promise.all([
+			api('/api/session', { headers: { cookie: firstCookie } }),
+			api('/api/session', { headers: { cookie: secondCookie } }),
+		]);
+		const sessions = await Promise.all(responses.map(jsonBody));
+		expect(sessions.filter((session) => session.authenticated === true)).toHaveLength(1);
+		const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(count?.count).toBe(100);
+	});
+
+	it('rejects the same legacy v2 cookie after newer sessions trim its record', async () => {
+		const legacyCookie = await legacySessionCookie();
+		await expect(jsonBody(await api('/api/session', { headers: { cookie: legacyCookie } }))).resolves.toMatchObject({ authenticated: true });
+		const future = Date.now() + 10_000;
+		for (let index = 1; index <= 99; index += 1) {
+			await env.DB.prepare(
+				`INSERT INTO auth_sessions (id_hash, vault_id, created_at, last_activity_at, last_reauth_at, expires_at, revoked_at, login_ip, login_at)
+				 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+			)
+				.bind(
+					String(index).padStart(43, 'd'),
+					'default',
+					future + index,
+					future + index,
+					future + index,
+					future + 1_000_000,
+					`198.51.100.${index}`,
+					future + index
+				)
+				.run();
+		}
+		await login(DEFAULT_PASSWORD, '203.0.113.240');
+
+		await expect(jsonBody(await api('/api/session', { headers: { cookie: legacyCookie } }))).resolves.toMatchObject({ authenticated: false });
+		const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM auth_sessions WHERE vault_id = ?')
+			.bind('default').first<{ count: number }>();
+		expect(count?.count).toBe(100);
+	});
+
+	it('rejects malformed device-history cursors', async () => {
+		const { cookie } = await login();
+		const response = await api('/api/auth/devices?cursor=not-a-valid-cursor', { headers: { cookie } });
+		expect(response.status).toBe(400);
+		await expect(response.json()).resolves.toMatchObject({ code: 'invalid_cursor' });
+	});
+
 	it('serves folder controls and settings drawer logout behavior', async () => {
 		const appHtml = await (await env.ASSETS.fetch(new Request(`${ORIGIN}/`))).text();
 		expect(appHtml).toContain('id="folderList"');
@@ -478,6 +653,14 @@ describe('private-notes worker', () => {
 		expect(appScript).toContain("button.setAttribute('aria-current', 'page')");
 		expect(appScript).toContain('state.settingsReturnFocus');
 		expect(appScript).toContain('returnFocus.focus();');
+	});
+
+	it('serves login-device pagination controls', async () => {
+		const appHtml = await (await env.ASSETS.fetch(new Request(`${ORIGIN}/`))).text();
+		expect(appHtml).toContain('id="authDevicesPagination"');
+		expect(appHtml).toContain('id="authDevicesPreviousBtn"');
+		expect(appHtml).toContain('id="authDevicesNextBtn"');
+		expect(appHtml).toContain('id="authDevicesPageLabel"');
 	});
 
 	it('applies public branding variables to app pages and the PWA manifest', async () => {

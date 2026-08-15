@@ -291,6 +291,15 @@ button, input, textarea { font: inherit; }
   display: grid;
   gap: 8px;
 }
+.auth-devices-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.auth-devices-pagination .btn {
+  min-width: 76px;
+}
 .auth-device-row {
   display: grid;
   gap: 3px;
