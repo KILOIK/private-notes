@@ -161,6 +161,9 @@ dist
 # Local implementation worktrees
 .worktrees/
 
+# Internal Superpowers task state and generated sketches
+.superpowers/
+
 # wrangler project
 
 .dev.vars*
