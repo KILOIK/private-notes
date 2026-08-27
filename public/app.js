@@ -1,12 +1,12 @@
 import { encryptSharedPayload } from './share-crypto.js';
 import { buildHighlightedTextSegments, buildNoteCardViewModel, buildReaderRenderPlan, extractAttachmentIds, renderMarkdown } from './markdown.js';
-import { loadEditorMarkdown, runEditorCommand, serializeEditorMarkdown } from './document-editor.js';
+import { insertPasswordBlock, loadEditorMarkdown, runEditorCommand, serializeEditorMarkdown } from './document-editor.js';
 import { decryptAttachment, encryptAttachment, extractDroppedImage, extractPastedImages, revokeAttachmentUrls } from './attachment-crypto.js';
 import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePendingToken } from './attachment-draft.js';
 import { buildComposerFolderChoices, matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
-import { buildNoteSaveContent, decodeNoteRecord, getSafeRecordText } from './note-records.js';
+import { appendPasswordBlock, buildNoteSaveContent, decodeNoteRecord, getSafeRecordText } from './note-records.js';
 import { createDefaultPasswordFields } from './password-fields.js';
-import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader, renderSecretReader } from './password-ui.js';
+import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
 import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { beginComposerSaving } from './composer-saving.js';
@@ -297,12 +297,6 @@ const els = {
   readerDocument: getElement('readerDocument'),
   readerEditor: getElement('readerEditor'),
   passwordFields: getElement('passwordFields'),
-  notePasswordSection: getElement('notePasswordSection'),
-  notePasswordEditor: getElement('notePasswordEditor'),
-  addNotePasswordBtn: getButton('addNotePasswordBtn'),
-  notePasswordInput: getInput('notePasswordInput'),
-  notePasswordToggleBtn: getButton('notePasswordToggleBtn'),
-  notePasswordClearBtn: getButton('notePasswordClearBtn'),
   readerMoreMenu: getElement('readerMoreMenu'),
   readerDeleteBtn: getButton('readerDeleteBtn'),
   editorModal: getElement('editorModal'),
@@ -316,6 +310,7 @@ const els = {
   editorToolbar: getElement('editorToolbar'),
   insertLinkBtn: getButton('insertLinkBtn'),
   insertImageBtn: getButton('insertImageBtn'),
+  insertPasswordBlockBtn: getButton('insertPasswordBlockBtn'),
   attachmentStatus: getElement('attachmentStatus'),
   mobilePasteStatus: getElement('mobilePasteStatus'),
   editorPreview: getElement('editorPreview'),
@@ -1683,8 +1678,6 @@ function updateComposerRecordType(recordType) {
   els.editorTitle.classList.remove('hidden');
   els.editorCard.classList.toggle('is-document-composer', !password);
   els.passwordEditorFields.classList.toggle('hidden', !password);
-  els.notePasswordSection.classList.toggle('hidden', password);
-  renderNotePasswordEditorState();
   els.editorContent.classList.add('hidden');
   els.documentEditor.classList.toggle('hidden', password);
   els.editorPreview.classList.add('hidden');
@@ -1692,12 +1685,6 @@ function updateComposerRecordType(recordType) {
   els.attachmentStatus.classList.toggle('hidden', password);
   els.mobilePasteStatus.classList.toggle('hidden', password);
   if (password) renderPasswordEditorFields();
-}
-
-function renderNotePasswordEditorState() {
-  const enabled = state.editorRecordType === 'note' && state.editorNotePasswordEnabled;
-  els.addNotePasswordBtn.classList.toggle('hidden', enabled);
-  els.notePasswordEditor.classList.toggle('hidden', !enabled);
 }
 
 function renderPasswordEditorFields() {
@@ -1714,7 +1701,7 @@ function getComposerSnapshot() {
     folderId: state.editorFolderId,
     fields: state.editorPasswordFields,
     markdown: state.editorRecordType === 'password' ? '' : getEditorSourceMarkdown(),
-    notePassword: state.editorRecordType === 'password' || !state.editorNotePasswordEnabled ? '' : els.notePasswordInput.value,
+    notePassword: '',
     pendingCount: state.attachmentDraft.images.length,
   });
 }
@@ -1768,15 +1755,13 @@ function openComposer(note) {
   state.editorPasswordFields = recordType === 'password' && Array.isArray(record?.fields)
     ? record.fields.map(function (/** @type {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} */ field) { return { ...field }; })
     : createDefaultPasswordFields();
-  state.editorNotePassword = recordType === 'note' && typeof record?.password === 'string' ? record.password : '';
-  state.editorNotePasswordEnabled = Boolean(state.editorNotePassword);
+  state.editorNotePassword = '';
+  state.editorNotePasswordEnabled = false;
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? String(note.title || record?.title || '') : '';
-  els.notePasswordInput.value = state.editorNotePassword;
-  els.notePasswordInput.type = 'password';
-  els.notePasswordToggleBtn.setAttribute('aria-label', '显示密码');
-  els.notePasswordToggleBtn.setAttribute('title', '显示密码');
-  const markdown = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
+  const markdown = recordType === 'note' && record?.type === 'note'
+    ? (record.password ? appendPasswordBlock(record.markdown, record.password) : record.markdown)
+    : '';
   state.editorSourceMarkdown = markdown;
   state.editorSourceDirty = false;
   els.editorContent.value = markdown;
@@ -1947,10 +1932,6 @@ async function openReader(noteId) {
   }
   if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
   els.readerContent.append(renderMarkdown(plan.markdown, attachmentMap));
-  if (typeof record.password === 'string' && record.password) {
-    els.passwordFields.classList.remove('hidden');
-    renderSecretReader(els.passwordFields, record.password, '密码', navigator.clipboard, setStatus);
-  }
 }
 
 function closeReader() {
@@ -2086,8 +2067,7 @@ async function saveComposer() {
       markdown = replacePendingToken(markdown, image.token, image.attachmentId);
     }
   }
-  const notePassword = password || !state.editorNotePasswordEnabled ? '' : els.notePasswordInput.value;
-  if (!rawTitle && !markdown && !notePassword) throw new Error('标题、内容和密码至少写一个');
+  if (!rawTitle && !markdown) throw new Error('标题和内容至少写一个');
   if (!state.vaultUnlocked || !state.vaultKey) {
     throw new Error('请先输入本地解锁密钥');
   }
@@ -2097,7 +2077,7 @@ async function saveComposer() {
 
   setStatus('保存中…');
 
-  const content = passwordPayload ? passwordPayload.content : buildNoteSaveContent(markdown, state.editorFolderId, notePassword);
+  const content = passwordPayload ? passwordPayload.content : buildNoteSaveContent(markdown, state.editorFolderId);
   const encryptedTitle = await encryptValue(title);
   const encryptedContent = await encryptValue(content);
   const attachmentIds = password ? [] : extractAttachmentIds(markdown);
@@ -2852,25 +2832,11 @@ els.readerPermanentDeleteBtn.onclick = function () {
 els.editorFolder.onchange = function () {
   state.editorFolderId = els.editorFolder.value || null;
 };
-els.notePasswordInput.addEventListener('input', function () {
-  state.editorNotePassword = els.notePasswordInput.value;
-});
-els.addNotePasswordBtn.onclick = function () {
-  state.editorNotePasswordEnabled = true;
-  renderNotePasswordEditorState();
-  els.notePasswordInput.focus();
-};
-els.notePasswordToggleBtn.onclick = function () {
-  const hidden = els.notePasswordInput.type === 'password';
-  els.notePasswordInput.type = hidden ? 'text' : 'password';
-  els.notePasswordToggleBtn.setAttribute('aria-label', hidden ? '隐藏密码' : '显示密码');
-  els.notePasswordToggleBtn.setAttribute('title', hidden ? '隐藏密码' : '显示密码');
-};
-els.notePasswordClearBtn.onclick = function () {
-  els.notePasswordInput.value = '';
-  state.editorNotePassword = '';
-  state.editorNotePasswordEnabled = false;
-  renderNotePasswordEditorState();
+els.insertPasswordBlockBtn.onclick = function () {
+  const block = insertPasswordBlock(els.documentEditor);
+  markEditorSourceDirty();
+  const input = block.querySelector('.password-block-input');
+  if (input instanceof HTMLInputElement) input.focus();
 };
 els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { setStatus(error.message || '绑定失败'); }); };
 els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };

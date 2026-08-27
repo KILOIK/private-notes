@@ -1,4 +1,4 @@
-import { renderMarkdown } from './markdown.js';
+import { createPasswordBlockElement, renderMarkdown } from './markdown.js';
 
 const COMMANDS = new Map([
   ['undo', ['undo', undefined]],
@@ -64,8 +64,6 @@ function isSafeLink(url) {
 /** @param {string} value */
 function escapeText(value) {
   const source = String(value || '');
-  /** @param {string | undefined} char */
-  const isWord = (char) => !!char && /[\p{L}\p{N}]/u.test(char);
   let output = '';
   for (let index = 0; index < source.length; index += 1) {
     const char = source[index];
@@ -76,21 +74,6 @@ function escapeText(value) {
         index += 1;
       } else {
         output += char;
-      }
-      continue;
-    }
-    if (char === '_') {
-      const previous = source[index - 1];
-      const next = source[index + 1];
-      if (isWord(previous) && isWord(next)) {
-        let start = index;
-        while (start > 0 && /[\p{L}\p{N}_]/u.test(source[start - 1])) start -= 1;
-        let end = index + 1;
-        while (end < source.length && /[\p{L}\p{N}_]/u.test(source[end])) end += 1;
-        const run = source.slice(start, end);
-        output += (run.match(/_/g) || []).length > 1 ? '\\_' : '_';
-      } else {
-        output += '\\_';
       }
       continue;
     }
@@ -105,10 +88,22 @@ function serializeInline(node) {
   if (node.nodeType === 3 || !node.tagName) return escapeText(String(node.textContent || ''));
   const tag = String(node.tagName).toUpperCase();
   if (tag === 'BR') return '\n';
-  if (tag === 'STRONG' || tag === 'B') return `**${childrenOf(node).map(serializeInline).join('')}**`;
-  if (tag === 'EM' || tag === 'I') return `*${childrenOf(node).map(serializeInline).join('')}*`;
-  if (tag === 'U') return `<u>${childrenOf(node).map(serializeInline).join('')}</u>`;
-  if (tag === 'S' || tag === 'DEL' || tag === 'STRIKE') return `~~${childrenOf(node).map(serializeInline).join('')}~~`;
+  if (tag === 'STRONG' || tag === 'B') {
+    const content = childrenOf(node).map(serializeInline).join('');
+    return content.trim() ? `**${content}**` : '';
+  }
+  if (tag === 'EM' || tag === 'I') {
+    const content = childrenOf(node).map(serializeInline).join('');
+    return content.trim() ? `*${content}*` : '';
+  }
+  if (tag === 'U') {
+    const content = childrenOf(node).map(serializeInline).join('');
+    return content.trim() ? `<u>${content}</u>` : '';
+  }
+  if (tag === 'S' || tag === 'DEL' || tag === 'STRIKE') {
+    const content = childrenOf(node).map(serializeInline).join('');
+    return content.trim() ? `~~${content}~~` : '';
+  }
   if (tag === 'CODE') return `\`${getText(node).replace(/`/g, '\\`')}\``;
   if (tag === 'A') {
     const href = getAttribute(node, 'href');
@@ -165,6 +160,11 @@ function serializeBlocks(nodes) {
 function serializeBlock(node) {
   if (!node) return '';
   if (node.nodeType === 3 || !node.tagName) return escapeText(String(node.textContent || '')).trim();
+  if (getAttribute(node, 'data-password-block') === 'true') {
+    const input = childrenOf(node).find((child) => getTagName(child) === 'INPUT');
+    const value = String(input?.value ?? getAttribute(input, 'value') ?? '');
+    return `:::password\n${value}\n:::`;
+  }
   const tag = getTagName(node);
   if (/^H[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag.slice(1)))} ${childrenOf(node).map(serializeInline).join('')}`.trim();
   if (tag === 'P' || tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') return childrenOf(node).map(serializeInline).join('').trim();
@@ -194,10 +194,28 @@ export function ensureEditorPlaceholder(editor) {
 
 /** @param {HTMLElement} editor @param {string} markdown @param {Map<string, string>} [attachments] @param {Map<string, string>} [pendingAttachments] */
 export function loadEditorMarkdown(editor, markdown, attachments = new Map(), pendingAttachments = new Map()) {
-  editor.replaceChildren(renderMarkdown(markdown, attachments, pendingAttachments));
+  editor.replaceChildren(renderMarkdown(markdown, attachments, pendingAttachments, { passwordBlockEditable: true }));
   editor.setAttribute('contenteditable', 'true');
   editor.removeAttribute('data-empty');
   if (!String(markdown || '').trim()) ensureEditorPlaceholder(editor);
+}
+
+/** @param {HTMLElement} editor @param {string} [value] */
+export function insertPasswordBlock(editor, value = '') {
+  const block = createPasswordBlockElement(value, true);
+  const selection = typeof window !== 'undefined' && typeof window.getSelection === 'function' ? window.getSelection() : null;
+  const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+  if (selection && range && editor.contains(range.commonAncestorContainer)) {
+    range.deleteContents();
+    range.insertNode(block);
+    range.setStartAfter(block);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } else {
+    editor.append(block);
+  }
+  return block;
 }
 
 /** @param {HTMLElement} editor */

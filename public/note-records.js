@@ -96,7 +96,26 @@ export function encodeNoteRecord(record) {
 
 /** @param {string} markdown @param {string | null} folderId @param {string} [password] */
 export function buildNoteSaveContent(markdown, folderId, password = '') {
-  return encodeNoteRecord({ type: 'note', folderId: folderId, markdown: markdown, password: password });
+  return encodeNoteRecord({ type: 'note', folderId: folderId, markdown: appendPasswordBlock(markdown, password) });
+}
+
+/** @param {string} source @param {string} value */
+export function appendPasswordBlock(source, value) {
+  const markdown = String(source || '');
+  const password = String(value || '');
+  if (!password) return markdown;
+  return `${markdown}${markdown ? '\n\n' : ''}:::password\n${password}\n:::`;
+}
+
+/** @param {string} source */
+export function stripPasswordBlocks(source) {
+  const markdown = String(source || '');
+  const blockPattern = /(?:^|\n)\s*:::password\s*\n[\s\S]*?\n\s*:::\s*(?=\n|$)/gi;
+  if (!blockPattern.test(markdown)) return markdown;
+  return markdown
+    .replace(blockPattern, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /** @param {any} record */
@@ -122,13 +141,13 @@ export function encodePasswordRecord(record) {
  */
 export function getSafeRecordText(record, legacyContent = '') {
   if (!record) return String(legacyContent || '');
-  if (record.type === 'note') return String(record.markdown || '');
+  if (record.type === 'note') return stripPasswordBlocks(record.markdown || '');
   return null;
 }
 
 /** @param {any} record @param {number} maxLength */
 export function buildNoteSnippet(record, maxLength = 140) {
-  const markdown = typeof record === 'string' ? record : String(record?.markdown || '');
+  const markdown = stripPasswordBlocks(typeof record === 'string' ? record : String(record?.markdown || ''));
   const plain = markdown
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]*>/g, '')

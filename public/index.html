@@ -257,17 +257,6 @@
         <div id="passwordEditorFields" class="password-editor-fields hidden" aria-label="密码编辑字段">
           <span class="per-field-copy">每个字段都可以单独复制</span>
         </div>
-        <div id="notePasswordSection" class="note-password-section hidden" aria-label="笔记密码块">
-          <button id="addNotePasswordBtn" class="btn secondary" type="button">添加密码块</button>
-          <div id="notePasswordEditor" class="note-password-editor hidden">
-            <label class="field-label" for="notePasswordInput">密码块</label>
-            <div class="note-password-input-row">
-              <input id="notePasswordInput" class="input" type="password" autocomplete="new-password" placeholder="阅读时默认掩码显示" />
-              <button id="notePasswordToggleBtn" class="icon-btn password-visibility-toggle" type="button" aria-label="显示密码" title="显示密码"></button>
-              <button id="notePasswordClearBtn" class="btn secondary" type="button">移除密码块</button>
-            </div>
-          </div>
-        </div>
         <div class="editor-spacer"></div>
         <div id="editorToolbar" class="editor-toolbar document-toolbar" role="toolbar" aria-label="文档工具栏">
           <button class="btn secondary" type="button" data-editor-command="undo" aria-label="撤销" title="撤销">撤</button>
@@ -284,6 +273,7 @@
           <button class="btn secondary" type="button" data-editor-command="code-block" aria-label="代码块" title="代码块">&lt;/&gt;</button>
           <button id="insertLinkBtn" class="btn secondary" type="button" aria-label="链接" title="链接">链</button>
           <button id="insertImageBtn" class="btn secondary" type="button" aria-label="图片" title="图片">图</button>
+          <button id="insertPasswordBlockBtn" class="btn secondary" type="button" aria-label="密码块" title="在正文中插入密码块">密</button>
         </div>
         <div id="attachmentStatus" class="attachment-status" role="status"></div>
         <div id="mobilePasteStatus" class="attachment-status" role="status" aria-live="polite">手机端可直接在正文区域粘贴图片</div>

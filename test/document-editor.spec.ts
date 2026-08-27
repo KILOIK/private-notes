@@ -132,6 +132,15 @@ describe('controlled Markdown document editor', () => {
 		expect(serializeEditorMarkdown(editor as never)).toBe('```ts\nconst value = 1;\n```');
 	});
 
+	it('serializes an inline password block without changing surrounding text', () => {
+		const passwordInput = element('input', [], { type: 'password', value: 'secret' });
+		(passwordInput as unknown as { value: string }).value = 'secret';
+		const passwordBlock = element('div', [element('span', [text('密码块')]), passwordInput], { 'data-password-block': 'true' });
+		const editor = new EditorNode('div');
+		editor.append(element('p', [text('正文前')]), passwordBlock, element('p', [text('正文后')]));
+		expect(serializeEditorMarkdown(editor as never)).toBe('正文前\n\n:::password\nsecret\n:::\n\n正文后');
+	});
+
 	it('preserves a literal backslash in a text node when serializing', () => {
 		const editor = new EditorNode('div');
 		editor.append(element('p', [text(String.raw`pmr\_01@126.com`)]));
@@ -154,10 +163,16 @@ describe('controlled Markdown document editor', () => {
 		expect(serializeEditorMarkdown(editor as never)).toBe('账号 user_name 与路径 C:\\tmp\\notes');
 	});
 
-	it('escapes repeated word-internal underscores so they cannot become emphasis', () => {
+	it('preserves repeated word-internal underscores without turning them into emphasis', () => {
 		const editor = new EditorNode('div');
 		editor.append(element('p', [text('版本 a_b_c 与 user_name')]));
-		expect(serializeEditorMarkdown(editor as never)).toBe(String.raw`版本 a\_b\_c 与 user_name`);
+		expect(serializeEditorMarkdown(editor as never)).toBe('版本 a_b_c 与 user_name');
+	});
+
+	it('does not serialize empty formatting wrappers as visible marker lines', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('p', [element('strong', [element('br')]), text('正文')]));
+		expect(serializeEditorMarkdown(editor as never)).toBe('正文');
 	});
 
 	it('keeps nested list indentation when serializing wrapped blocks', () => {

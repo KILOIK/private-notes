@@ -639,29 +639,47 @@
   gap: 0;
 }
 
-.note-password-section {
+.markdown-password-block {
   display: grid;
-  gap: 8px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--workspace-divider);
-}
-
-.note-password-editor {
-  display: grid;
-  gap: 8px;
-}
-
-.note-password-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--workspace-divider);
+  border-bottom: 1px solid var(--workspace-divider);
+  background: #f8fafc;
 }
 
-.note-password-input-row .password-visibility-toggle {
+.password-block-label {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.password-block-input {
+  min-width: 0;
+}
+
+.password-block-input[readonly] {
+  cursor: default;
+}
+
+.password-block-remove,
+.markdown-password-block .password-visibility-toggle {
   width: 44px;
   height: 44px;
+}
+
+@media (max-width: 640px) {
+  .markdown-password-block {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .password-block-remove {
+    grid-column: 2 / -1;
+    width: auto;
+  }
 }
 
 .password-reader-field {

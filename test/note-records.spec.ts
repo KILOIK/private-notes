@@ -44,8 +44,7 @@ describe('note record codecs', () => {
 			v: 1,
 			type: 'note',
 			folderId: 'folder-1',
-			markdown: '正文',
-			password: 'secret',
+			markdown: '正文\n\n:::password\nsecret\n:::',
 		});
 		expect(getSafeRecordText(note, 'legacy')).toBe('正文');
 		expect(decodeNoteRecord(buildNoteSaveContent('正文', null, ''))).toEqual({
@@ -54,6 +53,12 @@ describe('note record codecs', () => {
 			folderId: null,
 			markdown: '正文',
 		});
+	});
+
+	it('preserves ordinary note whitespace when no password block exists', () => {
+		const markdown = '  正文保留首尾空白  ';
+		const note = decodeNoteRecord(buildNoteSaveContent(markdown, null));
+		expect(getSafeRecordText(note)).toBe(markdown);
 	});
 
 	it('normalizes fixed password fields before custom fields', () => {
@@ -196,7 +201,7 @@ describe('note record codecs', () => {
 	});
 
 	it('returns only Markdown for safe note sharing and copying', () => {
-		const note = decodeNoteRecord(JSON.stringify({ v: 1, type: 'note', folderId: null, markdown: '# Share me' }));
+		const note = decodeNoteRecord(JSON.stringify({ v: 1, type: 'note', folderId: null, markdown: '# Share me\n\n:::password\nsecret\n:::' }));
 		const password = decodeNoteRecord(JSON.stringify({ v: 1, type: 'password', folderId: null, fields: [
 			{ id: 'name', type: 'text', label: '名称', value: 'Account' },
 			{ id: 'username', type: 'text', label: '用户名', value: 'alice' },

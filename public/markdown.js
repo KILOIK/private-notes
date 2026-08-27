@@ -1,4 +1,5 @@
-import { buildNoteSnippet } from './note-records.js';
+import { appendPasswordBlock, buildNoteSnippet, stripPasswordBlocks } from './note-records.js';
+export { stripPasswordBlocks } from './note-records.js';
 
 const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -48,7 +49,7 @@ export function buildNoteCardViewModel(note) {
 /** @param {any} record */
 export function buildReaderRenderPlan(record) {
   if (record && record.type === 'note') {
-    const markdown = String(record.markdown || '');
+    const markdown = record.password ? appendPasswordBlock(String(record.markdown || ''), record.password) : String(record.markdown || '');
     return {
       renderMarkdown: true,
       markdown: markdown,
@@ -72,6 +73,52 @@ export function extractAttachmentIds(source) {
     }
   }
   return ids;
+}
+
+/** @param {string} value @param {boolean} [editable] @returns {HTMLDivElement} */
+export function createPasswordBlockElement(value = '', editable = false) {
+  if (typeof document === 'undefined') throw new Error('Password blocks require a browser document');
+  const block = document.createElement('div');
+  block.className = 'markdown-password-block';
+  block.setAttribute('data-password-block', 'true');
+  block.setAttribute('contenteditable', 'false');
+  const label = document.createElement('span');
+  label.className = 'password-block-label';
+  label.textContent = '密码块';
+  const input = document.createElement('input');
+  input.className = 'input password-block-input';
+  input.type = 'password';
+  input.value = String(value || '');
+  input.autocomplete = 'new-password';
+  input.readOnly = !editable;
+  input.setAttribute('type', 'password');
+  input.setAttribute('value', input.value);
+  input.setAttribute('aria-label', '密码块内容');
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'icon-btn password-visibility-toggle';
+  toggle.setAttribute('aria-label', '显示密码块');
+  toggle.setAttribute('title', '显示密码块');
+  toggle.onclick = function () {
+    const hidden = input.type === 'password';
+    input.type = hidden ? 'text' : 'password';
+    toggle.setAttribute('aria-label', hidden ? '隐藏密码块' : '显示密码块');
+    toggle.setAttribute('title', hidden ? '隐藏密码块' : '显示密码块');
+  };
+  block.append(label, input, toggle);
+  if (editable) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn secondary password-block-remove';
+    remove.textContent = '移除密码块';
+    remove.setAttribute('data-password-block-remove', 'true');
+    remove.onclick = function () {
+      block.dispatchEvent(new Event('input', { bubbles: true }));
+      block.remove();
+    };
+    block.append(remove);
+  }
+  return block;
 }
 
 /** @param {HTMLTextAreaElement} textarea @param {string} insertion */
@@ -202,8 +249,8 @@ function renderInline(text, attachments, pendingAttachments) {
   return fragment;
 }
 
-/** @param {string} source @param {Map<string, string>} [attachments] @param {Map<string, string>} [pendingAttachments] */
-export function renderMarkdown(source, attachments = new Map(), pendingAttachments = new Map()) {
+/** @param {string} source @param {Map<string, string>} [attachments] @param {Map<string, string>} [pendingAttachments] @param {{ passwordBlockEditable?: boolean }} [options] */
+export function renderMarkdown(source, attachments = new Map(), pendingAttachments = new Map(), options = {}) {
   if (typeof document === 'undefined') throw new Error('Markdown rendering requires a browser document');
   const root = document.createDocumentFragment();
   const lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
@@ -212,6 +259,14 @@ export function renderMarkdown(source, attachments = new Map(), pendingAttachmen
     const line = lines[index];
     if (!line.trim()) {
       index += 1;
+      continue;
+    }
+    if (/^\s*:::password\s*$/i.test(line)) {
+      const blockLines = [];
+      index += 1;
+      while (index < lines.length && !/^\s*:::\s*$/.test(lines[index])) blockLines.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      root.append(createPasswordBlockElement(blockLines.join('\n'), Boolean(options.passwordBlockEditable)));
       continue;
     }
     const fence = /^\s*```\s*([\w-]*)\s*$/.exec(line);

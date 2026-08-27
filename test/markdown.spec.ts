@@ -4,6 +4,7 @@ import {
 	buildReaderRenderPlan,
 	extractAttachmentIds,
 	insertMarkdownAtSelection,
+	stripPasswordBlocks,
 	renderMarkdown,
 	replaceAttachmentReference,
 } from '../public/markdown.js';
@@ -32,6 +33,10 @@ class MarkdownTestNode {
 	setAttribute(name: string, value: string) {
 		this.attributes.set(name, value);
 	}
+
+	getAttribute(name: string) {
+		return this.attributes.get(name) || null;
+	}
 }
 
 function installMarkdownDocument() {
@@ -55,6 +60,15 @@ function flattenTags(root: MarkdownTestNode): string[] {
 
 function flattenText(root: MarkdownTestNode): string {
 	return root.textContent || root.childNodes.map(flattenText).join('');
+}
+
+function findByAttribute(root: MarkdownTestNode, name: string, value: string): MarkdownTestNode | null {
+	if (typeof root?.getAttribute === 'function' && root.getAttribute(name) === value) return root;
+	for (const child of root.childNodes) {
+		const found = findByAttribute(child, name, value);
+		if (found) return found;
+	}
+	return null;
 }
 
 it('keeps highlighted note titles as text segments instead of HTML', () => {
@@ -155,6 +169,26 @@ it('does not parse underscores inside words as emphasis', () => {
 	} finally {
 		restore();
 	}
+});
+
+it('renders password blocks inside the document with a masked input', () => {
+	const restore = installMarkdownDocument();
+	try {
+		const fragment = renderMarkdown('正文前\n\n:::password\nsecret\n:::\n\n正文后') as unknown as MarkdownTestNode;
+		expect(flattenTags(fragment)).toContain('INPUT');
+		const block = findByAttribute(fragment, 'data-password-block', 'true');
+		expect(block).not.toBeNull();
+		const input = block!.childNodes[1];
+		expect(input.getAttribute('type')).toBe('password');
+		expect(input.getAttribute('value')).toBe('secret');
+	} finally {
+		restore();
+	}
+});
+
+it('removes password block contents from safe copy/share text', () => {
+	const markdown = '正文前\n\n:::password\nsecret\n:::\n\n正文后';
+	expect(stripPasswordBlocks(markdown)).toBe('正文前\n\n正文后');
 });
 
 it('keeps unsafe links inert and resolves only known encrypted attachments', () => {
