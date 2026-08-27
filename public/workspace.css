@@ -168,6 +168,33 @@
   cursor: pointer;
 }
 
+.folder-nav-row {
+  display: flex;
+  align-items: center;
+}
+
+.folder-nav-row .folder-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.folder-toggle {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.folder-toggle:hover,
+.folder-toggle:focus-visible {
+  color: #166534;
+  background: #f0fdf4;
+}
+
 .folder-chip,
 .folder-subfilter,
 .navigation-command {
@@ -207,6 +234,10 @@
   display: grid;
   gap: 2px;
   padding-left: 22px;
+}
+
+.folder-subfilters[hidden] {
+  display: none;
 }
 
 .folder-subfilter {
@@ -608,12 +639,17 @@
   gap: 0;
 }
 
-.note-password-editor {
+.note-password-section {
   display: grid;
   gap: 8px;
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--workspace-divider);
+}
+
+.note-password-editor {
+  display: grid;
+  gap: 8px;
 }
 
 .note-password-input-row {

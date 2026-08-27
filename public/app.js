@@ -54,6 +54,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * loginTitle: string,
  * loginDescription: string,
  * idleTimeoutSeconds: number,
+ * vaultLockTimeoutSeconds: number,
  * readerNoteId: string | null,
  * readerOperation: ReturnType<typeof createLatestOperation>,
  * editorMode: 'source' | 'preview',
@@ -67,15 +68,18 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * reauthRequired: boolean,
  * totpEnabled: boolean,
  * idleTimer: number | null,
+ * lastUserActivityAt: number,
  * encryptedFolders: Array<{ id: string, name: string, created_at: number, updated_at: number }>,
  * folders: Array<{ id: string, name: string, created_at: number, updated_at: number }>,
  * folderMap: Map<string, { id: string, name: string, created_at: number, updated_at: number }>,
  * activeCategory: 'all' | 'note' | 'password',
- * activeFolderId: string | null | undefined
+ * activeFolderId: string | null | undefined,
+ * expandedFolderIds: Set<string>
  * sortKey: 'updated' | 'created' | 'title'
  * editorRecordType: 'note' | 'password'
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
  * editorNotePassword: string
+ * editorNotePasswordEnabled: boolean
  * editorFolderId: string | null
  * editorSourceMarkdown: string
  * editorSourceDirty: boolean
@@ -122,6 +126,7 @@ const state = {
   loginTitle: '正在打开我的笔记',
   loginDescription: '输入密码后即可进入应用，并在本地解锁你的加密笔记。',
   idleTimeoutSeconds: 1800,
+  vaultLockTimeoutSeconds: 1800,
   readerNoteId: null,
   readerOperation: createLatestOperation(),
   editorMode: 'source',
@@ -135,15 +140,18 @@ const state = {
   reauthRequired: false,
   totpEnabled: false,
   idleTimer: null,
+  lastUserActivityAt: 0,
   encryptedFolders: [],
   folders: [],
   folderMap: new Map(),
   activeCategory: 'all',
   activeFolderId: null,
+  expandedFolderIds: new Set(['__uncategorized__']),
   sortKey: 'updated',
   editorRecordType: 'note',
   editorPasswordFields: [],
   editorNotePassword: '',
+  editorNotePasswordEnabled: false,
   editorFolderId: null,
   editorSourceMarkdown: '',
   editorSourceDirty: false,
@@ -224,6 +232,7 @@ const els = {
   loginTitleInput: getInput('loginTitleInput'),
   loginDescriptionInput: getTextArea('loginDescriptionInput'),
   idleTimeoutSelect: getSelect('idleTimeoutSelect'),
+  vaultLockTimeoutSelect: getSelect('vaultLockTimeoutSelect'),
   authSettingsPassword: getInput('authSettingsPassword'),
   saveAuthSettingsBtn: getButton('saveAuthSettingsBtn'),
   authSettingsStatus: getElement('authSettingsStatus'),
@@ -288,7 +297,9 @@ const els = {
   readerDocument: getElement('readerDocument'),
   readerEditor: getElement('readerEditor'),
   passwordFields: getElement('passwordFields'),
+  notePasswordSection: getElement('notePasswordSection'),
   notePasswordEditor: getElement('notePasswordEditor'),
+  addNotePasswordBtn: getButton('addNotePasswordBtn'),
   notePasswordInput: getInput('notePasswordInput'),
   notePasswordToggleBtn: getButton('notePasswordToggleBtn'),
   notePasswordClearBtn: getButton('notePasswordClearBtn'),
@@ -552,7 +563,14 @@ function renderFilterNav() {
   });
   els.folderNav.querySelectorAll('.folder-subfilters').forEach(function (element) {
     const children = /** @type {HTMLElement} */ (element);
-    children.hidden = children.dataset.folderId !== (state.activeFolderId === null ? '__uncategorized__' : state.activeFolderId);
+    children.hidden = !state.expandedFolderIds.has(children.dataset.folderId || '');
+  });
+  els.folderNav.querySelectorAll('[data-folder-toggle]').forEach(function (element) {
+    const button = /** @type {HTMLButtonElement} */ (element);
+    const key = button.dataset.folderToggle || '';
+    const expanded = state.expandedFolderIds.has(key);
+    button.setAttribute('aria-expanded', String(expanded));
+    button.textContent = expanded ? '⌄' : '›';
   });
   els.trashNav.classList.toggle('is-active', state.trashMode);
   if (state.trashMode) els.trashNav.setAttribute('aria-current', 'page');
@@ -579,10 +597,13 @@ function appendFolderFilters(container, folderId, counts) {
 
 /** @param {string | null} folderId @param {string} name @param {{ total: number, note: number, password: number }} counts */
 function appendFolderFilter(folderId, name, counts) {
+  const key = folderId === null ? '__uncategorized__' : folderId;
+  const row = document.createElement('div');
+  row.className = 'folder-nav-row';
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'folder-chip';
-  button.dataset.folderId = folderId === null ? '__uncategorized__' : folderId;
+  button.dataset.folderId = key;
   button.dataset.folderCategory = 'all';
   const icon = document.createElement('span');
   icon.className = 'nav-item-icon';
@@ -595,7 +616,14 @@ function appendFolderFilter(folderId, name, counts) {
   count.className = 'nav-item-count';
   count.textContent = String(counts.total);
   button.append(icon, label, count);
-  els.folderNav.append(button);
+  row.append(button);
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'folder-toggle';
+  toggle.dataset.folderToggle = key;
+  toggle.setAttribute('aria-label', '展开或收起' + name);
+  row.append(toggle);
+  els.folderNav.append(row);
   appendFolderFilters(els.folderNav, folderId, counts);
 }
 
@@ -825,6 +853,7 @@ function clearFolderState() {
 function purgeVaultUi(discardDraft = true) {
   if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
   state.idleTimer = null;
+  state.lastUserActivityAt = 0;
   clearFolderState();
   state.vaultUnlocked = false;
   state.vaultKey = null;
@@ -852,25 +881,35 @@ function endSession() {
 function lockVault(reason) {
   purgeVaultUi(true);
   if (reason === 'logout') clearSessionAuthState(state);
-  if (reason === 'reauth_required' || reason === 'idle') {
+  if (reason === 'reauth_required') {
     state.sessionAuthenticated = true;
     state.reauthRequired = true;
     state.authMode = 'unlock';
   }
   showLogin();
-  setStatus(reason === 'idle' ? `已锁定：超过 ${Math.round(state.idleTimeoutSeconds / 60)} 分钟无操作，请重新验证` : '需要重新验证');
+  setStatus(reason === 'idle' ? `已锁定：超过 ${Math.round(state.vaultLockTimeoutSeconds / 60)} 分钟无操作，请输入密码解锁` : '需要重新验证');
 }
 
 function scheduleIdleLock() {
   if (state.idleTimer !== null) window.clearTimeout(state.idleTimer);
   if (!state.sessionAuthenticated || !state.vaultUnlocked) return;
+  const timeoutMs = state.vaultLockTimeoutSeconds * 1000;
+  const elapsedMs = state.lastUserActivityAt > 0 ? Date.now() - state.lastUserActivityAt : 0;
+  const remainingMs = Math.max(0, timeoutMs - elapsedMs);
+  if (remainingMs === 0) {
+    lockVault('idle');
+    return;
+  }
   state.idleTimer = window.setTimeout(function () {
     lockVault('idle');
-  }, state.idleTimeoutSeconds * 1000);
+  }, remainingMs);
 }
 
 function recordUserActivity() {
-  if (state.vaultUnlocked) scheduleIdleLock();
+  if (state.vaultUnlocked) {
+    state.lastUserActivityAt = Date.now();
+    scheduleIdleLock();
+  }
 }
 
 /**
@@ -924,16 +963,19 @@ async function loadPublicConfig() {
     state.loginDescription = data.login.description;
   }
   if (Number.isSafeInteger(data.idleTimeoutSeconds)) state.idleTimeoutSeconds = data.idleTimeoutSeconds;
+  if (Number.isSafeInteger(data.vaultLockTimeoutSeconds)) state.vaultLockTimeoutSeconds = data.vaultLockTimeoutSeconds;
 }
 
-/** @param {{ login: { title: string, description: string }, idleTimeoutSeconds: number }} settings */
+/** @param {{ login: { title: string, description: string }, idleTimeoutSeconds: number, vaultLockTimeoutSeconds: number }} settings */
 function applyAuthSettingsToForm(settings) {
   state.loginTitle = settings.login.title;
   state.loginDescription = settings.login.description;
   state.idleTimeoutSeconds = settings.idleTimeoutSeconds;
+  state.vaultLockTimeoutSeconds = settings.vaultLockTimeoutSeconds;
   els.loginTitleInput.value = settings.login.title;
   els.loginDescriptionInput.value = settings.login.description;
   els.idleTimeoutSelect.value = String(settings.idleTimeoutSeconds);
+  els.vaultLockTimeoutSelect.value = String(settings.vaultLockTimeoutSeconds);
 }
 
 async function loadAuthSettings() {
@@ -946,11 +988,12 @@ async function saveAuthSettings() {
   const title = els.loginTitleInput.value;
   const description = els.loginDescriptionInput.value;
   const idleTimeoutSeconds = Number(els.idleTimeoutSelect.value);
+  const vaultLockTimeoutSeconds = Number(els.vaultLockTimeoutSelect.value);
   if (!password) throw new Error('请输入当前密码');
   const data = await api('/api/auth/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password, login: { title, description }, idleTimeoutSeconds }),
+    body: JSON.stringify({ password, login: { title, description }, idleTimeoutSeconds, vaultLockTimeoutSeconds }),
   });
   applyAuthSettingsToForm(data);
   els.authSettingsPassword.value = '';
@@ -1351,6 +1394,16 @@ els.settingsLogoutBtn.onclick = function () {
 };
 
 els.folderNav.addEventListener('click', function (event) {
+  const toggle = event.target instanceof HTMLElement ? event.target.closest('[data-folder-toggle]') : null;
+  if (toggle instanceof HTMLButtonElement) {
+    const key = toggle.dataset.folderToggle;
+    if (key) {
+      if (state.expandedFolderIds.has(key)) state.expandedFolderIds.delete(key);
+      else state.expandedFolderIds.add(key);
+      renderFilterNav();
+    }
+    return;
+  }
   const target = event.target instanceof HTMLElement ? event.target.closest('[data-folder-id][data-folder-category]') : null;
   if (!(target instanceof HTMLButtonElement)) return;
   const folderId = target.dataset.folderId;
@@ -1358,6 +1411,7 @@ els.folderNav.addEventListener('click', function (event) {
   if (!folderId || (category !== 'all' && category !== 'note' && category !== 'password')) return;
   state.trashMode = false;
   state.activeFolderId = folderId === '__uncategorized__' ? null : folderId;
+  state.expandedFolderIds.add(folderId);
   state.activeCategory = category;
   applySearch();
   if (state.workspaceMode !== 'wide') {
@@ -1629,7 +1683,8 @@ function updateComposerRecordType(recordType) {
   els.editorTitle.classList.remove('hidden');
   els.editorCard.classList.toggle('is-document-composer', !password);
   els.passwordEditorFields.classList.toggle('hidden', !password);
-  els.notePasswordEditor.classList.toggle('hidden', password);
+  els.notePasswordSection.classList.toggle('hidden', password);
+  renderNotePasswordEditorState();
   els.editorContent.classList.add('hidden');
   els.documentEditor.classList.toggle('hidden', password);
   els.editorPreview.classList.add('hidden');
@@ -1637,6 +1692,12 @@ function updateComposerRecordType(recordType) {
   els.attachmentStatus.classList.toggle('hidden', password);
   els.mobilePasteStatus.classList.toggle('hidden', password);
   if (password) renderPasswordEditorFields();
+}
+
+function renderNotePasswordEditorState() {
+  const enabled = state.editorRecordType === 'note' && state.editorNotePasswordEnabled;
+  els.addNotePasswordBtn.classList.toggle('hidden', enabled);
+  els.notePasswordEditor.classList.toggle('hidden', !enabled);
 }
 
 function renderPasswordEditorFields() {
@@ -1653,7 +1714,7 @@ function getComposerSnapshot() {
     folderId: state.editorFolderId,
     fields: state.editorPasswordFields,
     markdown: state.editorRecordType === 'password' ? '' : getEditorSourceMarkdown(),
-    notePassword: state.editorRecordType === 'password' ? '' : els.notePasswordInput.value,
+    notePassword: state.editorRecordType === 'password' || !state.editorNotePasswordEnabled ? '' : els.notePasswordInput.value,
     pendingCount: state.attachmentDraft.images.length,
   });
 }
@@ -1708,6 +1769,7 @@ function openComposer(note) {
     ? record.fields.map(function (/** @type {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} */ field) { return { ...field }; })
     : createDefaultPasswordFields();
   state.editorNotePassword = recordType === 'note' && typeof record?.password === 'string' ? record.password : '';
+  state.editorNotePasswordEnabled = Boolean(state.editorNotePassword);
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? String(note.title || record?.title || '') : '';
   els.notePasswordInput.value = state.editorNotePassword;
@@ -1766,6 +1828,7 @@ function closeComposer(discardDraft = true) {
   state.composerPostSaveRecovery = null;
   state.editorPasswordFields = [];
   state.editorNotePassword = '';
+  state.editorNotePasswordEnabled = false;
   state.editorFolderId = null;
   state.editorSourceMarkdown = '';
   state.editorSourceDirty = false;
@@ -2023,7 +2086,7 @@ async function saveComposer() {
       markdown = replacePendingToken(markdown, image.token, image.attachmentId);
     }
   }
-  const notePassword = password ? '' : els.notePasswordInput.value;
+  const notePassword = password || !state.editorNotePasswordEnabled ? '' : els.notePasswordInput.value;
   if (!rawTitle && !markdown && !notePassword) throw new Error('标题、内容和密码至少写一个');
   if (!state.vaultUnlocked || !state.vaultKey) {
     throw new Error('请先输入本地解锁密钥');
@@ -2372,6 +2435,7 @@ async function unlockVault(passphrase, allowKeyCheckInit) {
   try {
     await verifyKeyCheck(config);
     state.vaultUnlocked = true;
+    state.lastUserActivityAt = Date.now();
     state.unlockError = '';
     await refreshFolders();
     await refreshNotes();
@@ -2552,7 +2616,19 @@ els.loginBtn.onclick = async function () {
       await verifyPendingTotp();
       return;
     }
-    const unlockOnly = state.sessionAuthenticated && !state.vaultUnlocked;
+    let unlockOnly = state.sessionAuthenticated && !state.vaultUnlocked;
+    if (unlockOnly) {
+      const sessionData = await api('/api/session', undefined, { recordActivity: false });
+      if (!sessionData.authenticated) {
+        state.sessionAuthenticated = false;
+        state.reauthRequired = false;
+        state.totpEnabled = false;
+        unlockOnly = false;
+      } else {
+        state.reauthRequired = Boolean(sessionData.reauthRequired);
+        state.totpEnabled = Boolean(sessionData.totpEnabled);
+      }
+    }
     let performedLogin = false;
     els.loginStatus.textContent = unlockOnly ? '解锁中…' : '登录中…';
     const password = els.passwordInput.value;
@@ -2779,6 +2855,11 @@ els.editorFolder.onchange = function () {
 els.notePasswordInput.addEventListener('input', function () {
   state.editorNotePassword = els.notePasswordInput.value;
 });
+els.addNotePasswordBtn.onclick = function () {
+  state.editorNotePasswordEnabled = true;
+  renderNotePasswordEditorState();
+  els.notePasswordInput.focus();
+};
 els.notePasswordToggleBtn.onclick = function () {
   const hidden = els.notePasswordInput.type === 'password';
   els.notePasswordInput.type = hidden ? 'text' : 'password';
@@ -2788,6 +2869,8 @@ els.notePasswordToggleBtn.onclick = function () {
 els.notePasswordClearBtn.onclick = function () {
   els.notePasswordInput.value = '';
   state.editorNotePassword = '';
+  state.editorNotePasswordEnabled = false;
+  renderNotePasswordEditorState();
 };
 els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { setStatus(error.message || '绑定失败'); }); };
 els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };
@@ -2947,7 +3030,10 @@ window.addEventListener('resize', handleWorkspaceResize, { passive: true });
   document.addEventListener(eventName, recordUserActivity, { passive: true });
 });
 document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'visible') recordUserActivity();
+  if (document.visibilityState !== 'visible' || !state.vaultUnlocked) return;
+  const elapsedMs = Date.now() - state.lastUserActivityAt;
+  if (elapsedMs >= state.vaultLockTimeoutSeconds * 1000) lockVault('idle');
+  else scheduleIdleLock();
 });
 
 updateSearchUi();

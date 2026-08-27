@@ -53,6 +53,10 @@ function flattenTags(root: MarkdownTestNode): string[] {
 	return root.childNodes.flatMap((child) => [child.tagName, ...flattenTags(child)]).filter(Boolean);
 }
 
+function flattenText(root: MarkdownTestNode): string {
+	return root.textContent || root.childNodes.map(flattenText).join('');
+}
+
 it('keeps highlighted note titles as text segments instead of HTML', () => {
 	expect(buildHighlightedTextSegments('<img src=x onerror=alert(1)> Weekly', '<img')).toEqual([
 		{ text: '<img', highlighted: true },
@@ -113,6 +117,41 @@ it('renders inline Markdown without treating non-image tokens as images', () => 
 	try {
 		const fragment = renderMarkdown('**bold** [docs](https://example.com) `code` ~~old~~ <u>under</u>') as unknown as MarkdownTestNode;
 		expect(flattenTags(fragment)).toEqual(['P', 'STRONG', 'A', 'CODE', 'S', 'U']);
+	} finally {
+		restore();
+	}
+});
+
+it('unescapes legacy punctuation escapes but preserves literal backslashes', () => {
+	const restore = installMarkdownDocument();
+	try {
+		const fragment = renderMarkdown(String.raw`联系 pmr\_01@126.com，路径 C:\\tmp\\notes`) as unknown as MarkdownTestNode;
+		const paragraph = fragment.childNodes[0];
+		expect(flattenText(paragraph)).toBe(String.raw`联系 pmr_01@126.com，路径 C:\\tmp\\notes`);
+	} finally {
+		restore();
+	}
+});
+
+it('unescapes legacy punctuation escapes inside formatted text', () => {
+	const restore = installMarkdownDocument();
+	try {
+		const fragment = renderMarkdown(String.raw`**pmr\_01@126.com**`) as unknown as MarkdownTestNode;
+		const strong = fragment.childNodes[0].childNodes[0].childNodes[0];
+		expect(strong.tagName).toBe('STRONG');
+		expect(strong.textContent).toBe('pmr_01@126.com');
+	} finally {
+		restore();
+	}
+});
+
+it('does not parse underscores inside words as emphasis', () => {
+	const restore = installMarkdownDocument();
+	try {
+		const fragment = renderMarkdown('版本 a_b_c 与 user_name') as unknown as MarkdownTestNode;
+		const paragraph = fragment.childNodes[0];
+		expect(flattenTags(fragment)).toEqual(['P']);
+		expect(flattenText(paragraph)).toBe('版本 a_b_c 与 user_name');
 	} finally {
 		restore();
 	}

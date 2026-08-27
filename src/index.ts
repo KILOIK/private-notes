@@ -689,13 +689,13 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 
 	if (url.pathname === '/api/public-config' && request.method === 'GET') {
 		const settings = await getAuthSettings(env);
-		return json({ ok: true, login: settings.login, idleTimeoutSeconds: settings.idleTimeoutSeconds });
+		return json({ ok: true, login: settings.login, idleTimeoutSeconds: settings.idleTimeoutSeconds, vaultLockTimeoutSeconds: settings.vaultLockTimeoutSeconds });
 	}
 
 	if (url.pathname === '/api/auth/settings' && request.method === 'GET') {
 		await requireActiveSession(request, env, { touch: true });
 		const settings = await getAuthSettings(env);
-		return json({ ok: true, login: settings.login, idleTimeoutSeconds: settings.idleTimeoutSeconds });
+		return json({ ok: true, login: settings.login, idleTimeoutSeconds: settings.idleTimeoutSeconds, vaultLockTimeoutSeconds: settings.vaultLockTimeoutSeconds });
 	}
 
 	if (url.pathname === '/api/auth/settings' && request.method === 'PUT') {
@@ -704,14 +704,20 @@ async function handleRequest(request: Request, env: AppEnv, ctx: ExecutionContex
 		if (typeof body.password !== 'string' || (await getVaultIdForPassword(env, body.password)) !== session.vaultId) return unauthorized();
 		const login = normalizeLoginBranding(body.login);
 		const idleTimeoutSeconds = normalizeIdleTimeoutSeconds(body.idleTimeoutSeconds);
-		if (!login || idleTimeoutSeconds === null) throw new ApiError(400, 'invalid_auth_settings', 'invalid login branding or idle timeout');
+		const current = await getAuthSettings(env);
+		const vaultLockTimeoutSeconds = body.vaultLockTimeoutSeconds === undefined
+			? current.vaultLockTimeoutSeconds
+			: normalizeIdleTimeoutSeconds(body.vaultLockTimeoutSeconds);
+		if (!login || idleTimeoutSeconds === null || vaultLockTimeoutSeconds === null) throw new ApiError(400, 'invalid_auth_settings', 'invalid login or timeout settings');
 		await env.DB.batch([
 			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
 				.bind('branding_login:v1', JSON.stringify(login)),
 			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
 				.bind('session_idle_timeout_seconds:v1', String(idleTimeoutSeconds)),
+			env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+				.bind('vault_lock_timeout_seconds:v1', String(vaultLockTimeoutSeconds)),
 		]);
-		return json({ ok: true, login, idleTimeoutSeconds });
+		return json({ ok: true, login, idleTimeoutSeconds, vaultLockTimeoutSeconds });
 	}
 
 	if (url.pathname === '/api/auth/devices' && request.method === 'GET') {

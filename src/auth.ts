@@ -10,12 +10,13 @@ export const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const SESSION_COOKIE_NAME = '__Host-session';
 export const MAX_PASSWORD_LENGTH = 1024;
 export const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 1800;
-export const SESSION_IDLE_TIMEOUT_OPTIONS = [300, 900, 1800, 3600, 14400] as const;
+export const DEFAULT_VAULT_LOCK_TIMEOUT_SECONDS = 1800;
+export const SESSION_IDLE_TIMEOUT_OPTIONS = [300, 900, 1800, 3600, 14400, 43200, 86400] as const;
 export const MAX_AUTH_DEVICE_RECORDS = 100;
 export const AUTH_DEVICE_PAGE_SIZE = 10;
 
 export type LoginBranding = { title: string; description: string };
-export type AuthSettings = { login: LoginBranding; idleTimeoutSeconds: number };
+export type AuthSettings = { login: LoginBranding; idleTimeoutSeconds: number; vaultLockTimeoutSeconds: number };
 
 const DEFAULT_LOGIN_BRANDING: LoginBranding = {
 	title: '正在打开我的笔记',
@@ -35,6 +36,7 @@ const TOTP_SECRET_META_KEY = 'totp_secret:v1';
 const TOTP_PENDING_META_KEY = 'totp_pending:v1';
 const LOGIN_BRANDING_META_KEY = 'branding_login:v1';
 const SESSION_IDLE_TIMEOUT_META_KEY = 'session_idle_timeout_seconds:v1';
+const VAULT_LOCK_TIMEOUT_META_KEY = 'vault_lock_timeout_seconds:v1';
 const TOTP_CHALLENGE_PREFIX = 'totp_challenge:v1:';
 const TOTP_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const UNSAFE_NEW_APP_PASSWORDS = new Set(['replace-with-a-long-unique-passphrase']);
@@ -278,8 +280,8 @@ export function normalizeIdleTimeoutSeconds(value: unknown) {
 }
 
 export async function getAuthSettings(env: AuthEnv): Promise<AuthSettings> {
-	const rows = await env.DB.prepare('SELECT key, value FROM app_meta WHERE key IN (?, ?)')
-		.bind(LOGIN_BRANDING_META_KEY, SESSION_IDLE_TIMEOUT_META_KEY)
+	const rows = await env.DB.prepare('SELECT key, value FROM app_meta WHERE key IN (?, ?, ?)')
+		.bind(LOGIN_BRANDING_META_KEY, SESSION_IDLE_TIMEOUT_META_KEY, VAULT_LOCK_TIMEOUT_META_KEY)
 		.all<{ key: string; value: string }>();
 	const values = new Map((rows.results ?? []).map((row) => [row.key, row.value]));
 	let login = DEFAULT_LOGIN_BRANDING;
@@ -291,7 +293,9 @@ export async function getAuthSettings(env: AuthEnv): Promise<AuthSettings> {
 	}
 	const parsedTimeout = Number(values.get(SESSION_IDLE_TIMEOUT_META_KEY));
 	const idleTimeoutSeconds = normalizeIdleTimeoutSeconds(parsedTimeout) ?? DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS;
-	return { login, idleTimeoutSeconds };
+	const parsedLockTimeout = Number(values.get(VAULT_LOCK_TIMEOUT_META_KEY));
+	const vaultLockTimeoutSeconds = normalizeIdleTimeoutSeconds(parsedLockTimeout) ?? DEFAULT_VAULT_LOCK_TIMEOUT_SECONDS;
+	return { login, idleTimeoutSeconds, vaultLockTimeoutSeconds };
 }
 
 export async function isTotpEnabled(env: AuthEnv) {
@@ -442,7 +446,7 @@ export async function getSession(request: Request, env: AuthEnv): Promise<Sessio
 	if (!row || row.revoked_at || row.expires_at <= Date.now()) {
 		return { authenticated: false, vaultId: DEFAULT_VAULT_ID, reauthRequired: false, sessionId: null };
 	}
-	const reauthRequired = Date.now() - row.last_activity_at > authSettings.idleTimeoutSeconds * 1000;
+	const reauthRequired = Date.now() - row.last_reauth_at > authSettings.idleTimeoutSeconds * 1000;
 	return { authenticated: true, vaultId: verified.vaultId, reauthRequired, sessionId };
 }
 

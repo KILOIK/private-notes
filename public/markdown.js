@@ -118,14 +118,19 @@ function isSafeLink(url) {
   }
 }
 
+/** @param {string} text */
+function unescapeMarkdownText(text) {
+  return String(text || '').replace(/\\([`*_~\[\]])/g, '$1');
+}
+
 /** @param {string} text @param {Map<string, string>} attachments @param {Map<string, string>} pendingAttachments */
 function renderInline(text, attachments, pendingAttachments) {
   const fragment = document.createDocumentFragment();
-  const tokenPattern = /!\[(?<imageAlt>[^\]]*)\]\((?<imageUrl>[^)\s]+)(?:\s+["'](?<imageTitle>[^"']*)["'])?\)|\[(?<linkText>[^\]]+)\]\((?<linkUrl>[^)\s]+)\)|(?<codeTicks>`+)(?<codeText>[^`]+)\k<codeTicks>|(?<strongMarker>\*\*|__)(?<strongText>.+?)\k<strongMarker>|(?<strikeMarker>~~)(?<strikeText>.+?)\k<strikeMarker>|<u>(?<underlineText>.+?)<\/u>|(?<emMarker>\*|_)(?<emText>.+?)\k<emMarker>/g;
+  const tokenPattern = /!\[(?<imageAlt>[^\]]*)\]\((?<imageUrl>[^)\s]+)(?:\s+["'](?<imageTitle>[^"']*)["'])?\)|\[(?<linkText>[^\]]+)\]\((?<linkUrl>[^)\s]+)\)|(?<codeTicks>`+)(?<codeText>[^`]+)\k<codeTicks>|(?<strongMarker>\*\*|__)(?<strongText>.+?)\k<strongMarker>|(?<strikeMarker>~~)(?<strikeText>.+?)\k<strikeMarker>|<u>(?<underlineText>.+?)<\/u>|(?<emMarker>\*|(?<![\p{L}\p{N}])_)(?<emText>.+?)\k<emMarker>(?![\p{L}\p{N}])/gu;
   let cursor = 0;
   let match;
   while ((match = tokenPattern.exec(text))) {
-    if (match.index > cursor) fragment.append(document.createTextNode(text.slice(cursor, match.index)));
+    if (match.index > cursor) fragment.append(document.createTextNode(unescapeMarkdownText(text.slice(cursor, match.index))));
     const groups = match.groups || {};
     if (typeof groups.imageUrl === 'string') {
       const url = groups.imageUrl;
@@ -163,7 +168,7 @@ function renderInline(text, attachments, pendingAttachments) {
         link.href = groups.linkUrl;
         link.target = '_blank';
         link.rel = 'noreferrer noopener';
-        link.textContent = groups.linkText;
+        link.textContent = unescapeMarkdownText(groups.linkText);
         fragment.append(link);
       } else {
         fragment.append(document.createTextNode(groups.linkText));
@@ -174,26 +179,26 @@ function renderInline(text, attachments, pendingAttachments) {
       fragment.append(code);
     } else if (groups.strongMarker) {
       const strong = document.createElement('strong');
-      strong.textContent = groups.strongText;
+      strong.textContent = unescapeMarkdownText(groups.strongText);
       fragment.append(strong);
     } else if (groups.strikeMarker) {
       const strike = document.createElement('s');
-      strike.textContent = groups.strikeText;
+      strike.textContent = unescapeMarkdownText(groups.strikeText);
       fragment.append(strike);
     } else if (typeof groups.underlineText === 'string') {
       const underline = document.createElement('u');
-      underline.textContent = groups.underlineText;
+      underline.textContent = unescapeMarkdownText(groups.underlineText);
       fragment.append(underline);
     } else if (groups.emMarker) {
       const emphasis = document.createElement('em');
-      emphasis.textContent = groups.emText;
+      emphasis.textContent = unescapeMarkdownText(groups.emText);
       fragment.append(emphasis);
     } else {
       fragment.append(document.createTextNode(match[0]));
     }
     cursor = match.index + match[0].length;
   }
-  if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)));
+  if (cursor < text.length) fragment.append(document.createTextNode(unescapeMarkdownText(text.slice(cursor))));
   return fragment;
 }
 

@@ -256,6 +256,9 @@ describe('private-notes worker', () => {
 		expect(appHtml).toContain('id="loginTitleInput"');
 		expect(appHtml).toContain('id="loginDescriptionInput"');
 		expect(appHtml).toContain('id="idleTimeoutSelect"');
+		expect(appHtml).toContain('id="vaultLockTimeoutSelect"');
+		expect(appHtml).toContain('value="43200">12 小时</option>');
+		expect(appHtml).toContain('value="86400">24 小时</option>');
 		expect(appHtml).toContain('id="saveAuthSettingsBtn"');
 		expect(appHtml).toContain('id="authDevicesList"');
 		expect(appHtml).toContain('role="dialog"');
@@ -384,6 +387,7 @@ describe('private-notes worker', () => {
 				description: '输入密码后即可进入应用，并在本地解锁你的加密笔记。',
 			},
 			idleTimeoutSeconds: 1800,
+			vaultLockTimeoutSeconds: 1800,
 		});
 	});
 
@@ -400,16 +404,17 @@ describe('private-notes worker', () => {
 		const updated = await api('/api/auth/settings', {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json', cookie },
-			body: JSON.stringify({ password: DEFAULT_PASSWORD, login: { title: '我的安全笔记', description: '输入密码后进入。' }, idleTimeoutSeconds: 900 }),
+			body: JSON.stringify({ password: DEFAULT_PASSWORD, login: { title: '我的安全笔记', description: '输入密码后进入。' }, idleTimeoutSeconds: 43200, vaultLockTimeoutSeconds: 900 }),
 		});
 		expect(updated.status).toBe(200);
 		expect(await jsonBody(await api('/api/public-config'))).toMatchObject({
 			login: { title: '我的安全笔记', description: '输入密码后进入。' },
-			idleTimeoutSeconds: 900,
+			idleTimeoutSeconds: 43200,
+			vaultLockTimeoutSeconds: 900,
 		});
 	});
 
-	it('enforces the configured idle timeout in the server session check', async () => {
+	it('enforces the configured authenticator interval from the last reauthentication', async () => {
 		const { cookie } = await login();
 		const updated = await api('/api/auth/settings', {
 			method: 'PUT',
@@ -417,7 +422,7 @@ describe('private-notes worker', () => {
 			body: JSON.stringify({ password: DEFAULT_PASSWORD, login: { title: '标题', description: '说明' }, idleTimeoutSeconds: 300 }),
 		});
 		expect(updated.status).toBe(200);
-		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(Date.now() - 301_000).run();
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?, last_reauth_at = ?').bind(Date.now(), Date.now() - 301_000).run();
 		const session = await api('/api/session', { headers: { cookie } });
 		expect(await jsonBody(session)).toMatchObject({ authenticated: true, reauthRequired: true });
 	});
@@ -425,7 +430,7 @@ describe('private-notes worker', () => {
 	it('reports authenticator state while an authenticated session needs reauthentication', async () => {
 		const { cookie } = await login();
 		await env.DB.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?)').bind('totp_enabled', '1').run();
-		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(Date.now() - 30 * 60 * 1000 - 1).run();
+		await env.DB.prepare('UPDATE auth_sessions SET last_reauth_at = ?').bind(Date.now() - 30 * 60 * 1000 - 1).run();
 
 		await expect(jsonBody(await api('/api/session', { headers: { cookie } }))).resolves.toMatchObject({
 			authenticated: true,
@@ -1128,10 +1133,10 @@ describe('private-notes worker', () => {
 		await expect(revoked.json()).resolves.toMatchObject({ authenticated: false });
 	});
 
-	it('requires password reauthentication after thirty minutes of inactivity', async () => {
+	it('requires password reauthentication after the authenticator interval', async () => {
 		const { cookie } = await login();
 		const staleAt = Date.now() - 30 * 60 * 1000 - 1;
-		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?').bind(staleAt).run();
+		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?, last_reauth_at = ?').bind(Date.now(), staleAt).run();
 		const blocked = await api('/api/notes', { headers: { cookie } });
 		expect(blocked.status).toBe(401);
 		await expect(blocked.json()).resolves.toMatchObject({ ok: false, error: 'reauth_required' });
@@ -1634,7 +1639,7 @@ describe('private-notes worker', () => {
 		});
 		expect(upload.status).toBe(201);
 		const attachmentId = String(((await jsonBody(upload)).attachment as JsonRecord).id);
-		await env.DB.prepare('UPDATE auth_sessions SET last_activity_at = ?')
+		await env.DB.prepare('UPDATE auth_sessions SET last_reauth_at = ?')
 			.bind(Date.now() - 30 * 60 * 1000 - 1)
 			.run();
 		const attachedDelete = await api(`/api/attachments/${attachedId}`, {

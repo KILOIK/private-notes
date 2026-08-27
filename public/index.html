@@ -125,13 +125,25 @@
             <input id="loginTitleInput" class="input" maxlength="64" placeholder="正在打开我的笔记" />
             <label class="field-label" for="loginDescriptionInput">页面说明</label>
             <textarea id="loginDescriptionInput" class="textarea settings-description-input" maxlength="160" rows="3" placeholder="输入密码后即可进入应用，并在本地解锁你的加密笔记。"></textarea>
-            <label class="field-label" for="idleTimeoutSelect">闲置多久后要求重新验证</label>
+            <label class="field-label" for="idleTimeoutSelect">Authenticator 二次验证间隔</label>
             <select id="idleTimeoutSelect" class="input">
               <option value="300">5 分钟</option>
               <option value="900">15 分钟</option>
               <option value="1800">30 分钟</option>
               <option value="3600">1 小时</option>
               <option value="14400">4 小时</option>
+              <option value="43200">12 小时</option>
+              <option value="86400">24 小时</option>
+            </select>
+            <label class="field-label" for="vaultLockTimeoutSelect">闲置多久自动锁定（仅需密码）</label>
+            <select id="vaultLockTimeoutSelect" class="input">
+              <option value="300">5 分钟</option>
+              <option value="900">15 分钟</option>
+              <option value="1800">30 分钟</option>
+              <option value="3600">1 小时</option>
+              <option value="14400">4 小时</option>
+              <option value="43200">12 小时</option>
+              <option value="86400">24 小时</option>
             </select>
             <label class="field-label" for="authSettingsPassword">当前密码</label>
             <input id="authSettingsPassword" class="input" type="password" autocomplete="current-password" placeholder="保存设置时验证" />
@@ -245,12 +257,15 @@
         <div id="passwordEditorFields" class="password-editor-fields hidden" aria-label="密码编辑字段">
           <span class="per-field-copy">每个字段都可以单独复制</span>
         </div>
-        <div id="notePasswordEditor" class="note-password-editor hidden" aria-label="笔记隐藏密码">
-          <label class="field-label" for="notePasswordInput">隐藏密码（可选）</label>
-          <div class="note-password-input-row">
-            <input id="notePasswordInput" class="input" type="password" autocomplete="new-password" placeholder="添加后阅读时默认掩码显示" />
-            <button id="notePasswordToggleBtn" class="icon-btn password-visibility-toggle" type="button" aria-label="显示密码" title="显示密码"></button>
-            <button id="notePasswordClearBtn" class="btn secondary" type="button">移除</button>
+        <div id="notePasswordSection" class="note-password-section hidden" aria-label="笔记密码块">
+          <button id="addNotePasswordBtn" class="btn secondary" type="button">添加密码块</button>
+          <div id="notePasswordEditor" class="note-password-editor hidden">
+            <label class="field-label" for="notePasswordInput">密码块</label>
+            <div class="note-password-input-row">
+              <input id="notePasswordInput" class="input" type="password" autocomplete="new-password" placeholder="阅读时默认掩码显示" />
+              <button id="notePasswordToggleBtn" class="icon-btn password-visibility-toggle" type="button" aria-label="显示密码" title="显示密码"></button>
+              <button id="notePasswordClearBtn" class="btn secondary" type="button">移除密码块</button>
+            </div>
           </div>
         </div>
         <div class="editor-spacer"></div>

@@ -138,14 +138,26 @@ describe('controlled Markdown document editor', () => {
 		expect(serializeEditorMarkdown(editor as never)).toBe(String.raw`pmr\_01@126.com`);
 	});
 
-	it('keeps markdown escapes stable after loading and serializing', () => {
+	it('removes obsolete escape slashes when loading and serializing ordinary text', () => {
 		const { documentStub } = createEditorDocument();
 		withDocument(documentStub, () => {
 			const editor = new EditorNode('div');
 			const source = String.raw`联系 pmr\_01@126.com`;
 			loadEditorMarkdown(editor as never, source);
-			expect(serializeEditorMarkdown(editor as never)).toBe(source);
+			expect(serializeEditorMarkdown(editor as never)).toBe('联系 pmr_01@126.com');
 		});
+	});
+
+	it('does not add escape slashes to ordinary text containing Markdown punctuation', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('p', [text('账号 user_name 与路径 C:\\tmp\\notes')]));
+		expect(serializeEditorMarkdown(editor as never)).toBe('账号 user_name 与路径 C:\\tmp\\notes');
+	});
+
+	it('escapes repeated word-internal underscores so they cannot become emphasis', () => {
+		const editor = new EditorNode('div');
+		editor.append(element('p', [text('版本 a_b_c 与 user_name')]));
+		expect(serializeEditorMarkdown(editor as never)).toBe(String.raw`版本 a\_b\_c 与 user_name`);
 	});
 
 	it('keeps nested list indentation when serializing wrapped blocks', () => {

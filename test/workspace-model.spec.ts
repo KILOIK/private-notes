@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNavigationModel, buildPasswordDisplayModel, filterNotesByQuery, getSortOptions, sortVisibleNotes } from '../public/workspace-model.js';
+import { buildNavigationModel, buildPasswordDisplayModel, filterNotesByQuery, getSortOptions, sortVisibleNotes, toggleFolderExpansion } from '../public/workspace-model.js';
 
 const folders = [
 	{ id: 'work', name: '工作' },
@@ -13,6 +13,10 @@ const notes = [
 ];
 
 describe('PDF workspace model', () => {
+	it('toggles an individual folder expansion state', () => {
+		expect(toggleFolderExpansion(new Set(['work']), 'work')).toEqual(new Set());
+		expect(toggleFolderExpansion(new Set(['work']), 'life')).toEqual(new Set(['work', 'life']));
+	});
 	it('searches every folder and record type when a query is present', () => {
 		const searchable = [
 			{ id: 'uncategorized', title: 'Alpha', content: 'secret text', created_at: 1, updated_at: 1, record: { type: 'note', folderId: null } },

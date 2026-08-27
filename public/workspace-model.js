@@ -75,6 +75,14 @@ export function filterNotesByQuery(notes, query) {
   });
 }
 
+/** @param {Set<string>} expanded @param {string} folderId @returns {Set<string>} */
+export function toggleFolderExpansion(expanded, folderId) {
+  const next = new Set(expanded);
+  if (next.has(folderId)) next.delete(folderId);
+  else next.add(folderId);
+  return next;
+}
+
 /** @param {Array<{ id: string, type: string, label: string, value: string }>} fields */
 export function buildPasswordDisplayModel(fields) {
   return fields.filter(function (field) {

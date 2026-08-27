@@ -63,7 +63,40 @@ function isSafeLink(url) {
 
 /** @param {string} value */
 function escapeText(value) {
-  return String(value || '').replace(/(?<!\\)[`*_~\[\]]/g, '\\$&');
+  const source = String(value || '');
+  /** @param {string | undefined} char */
+  const isWord = (char) => !!char && /[\p{L}\p{N}]/u.test(char);
+  let output = '';
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '\\') {
+      const next = source[index + 1];
+      if (next && /[`*~\[\]_]/u.test(next)) {
+        output += char + next;
+        index += 1;
+      } else {
+        output += char;
+      }
+      continue;
+    }
+    if (char === '_') {
+      const previous = source[index - 1];
+      const next = source[index + 1];
+      if (isWord(previous) && isWord(next)) {
+        let start = index;
+        while (start > 0 && /[\p{L}\p{N}_]/u.test(source[start - 1])) start -= 1;
+        let end = index + 1;
+        while (end < source.length && /[\p{L}\p{N}_]/u.test(source[end])) end += 1;
+        const run = source.slice(start, end);
+        output += (run.match(/_/g) || []).length > 1 ? '\\_' : '_';
+      } else {
+        output += '\\_';
+      }
+      continue;
+    }
+    output += /[`*~\[\]]/u.test(char) ? `\\${char}` : char;
+  }
+  return output;
 }
 
 /** @param {any} node @returns {string} */
