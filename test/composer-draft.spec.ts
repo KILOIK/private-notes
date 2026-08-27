@@ -14,7 +14,7 @@ describe('composer draft snapshot', () => {
 		expect(JSON.parse(snapshot).markdown).toBe(String.raw`pmr\_01@126.com`);
 	});
 
-	it('changes when a note title, folder, body, or pending image changes', () => {
+	it('changes when a note title, folder, body, password, or pending image changes', () => {
 		const base = createComposerDraftSnapshot({
 			recordType: 'note',
 			title: '标题',
@@ -27,6 +27,7 @@ describe('composer draft snapshot', () => {
 		expect(createComposerDraftSnapshot({ recordType: 'note', title: '新标题', folderId: 'work', fields: [], markdown: '正文', pendingCount: 0 })).not.toBe(base);
 		expect(createComposerDraftSnapshot({ recordType: 'note', title: '标题', folderId: 'life', fields: [], markdown: '正文', pendingCount: 0 })).not.toBe(base);
 		expect(createComposerDraftSnapshot({ recordType: 'note', title: '标题', folderId: 'work', fields: [], markdown: '新正文', pendingCount: 0 })).not.toBe(base);
+		expect(createComposerDraftSnapshot({ recordType: 'note', title: '标题', folderId: 'work', fields: [], markdown: '正文', notePassword: 'secret', pendingCount: 0 })).not.toBe(base);
 		expect(createComposerDraftSnapshot({ recordType: 'note', title: '标题', folderId: 'work', fields: [], markdown: '正文', pendingCount: 1 })).not.toBe(base);
 	});
 });

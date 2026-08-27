@@ -38,6 +38,24 @@ describe('note record codecs', () => {
 		});
 	});
 
+	it('round trips an optional hidden note password without changing legacy notes', () => {
+		const note = decodeNoteRecord(buildNoteSaveContent('正文', 'folder-1', 'secret'));
+		expect(note).toEqual({
+			v: 1,
+			type: 'note',
+			folderId: 'folder-1',
+			markdown: '正文',
+			password: 'secret',
+		});
+		expect(getSafeRecordText(note, 'legacy')).toBe('正文');
+		expect(decodeNoteRecord(buildNoteSaveContent('正文', null, ''))).toEqual({
+			v: 1,
+			type: 'note',
+			folderId: null,
+			markdown: '正文',
+		});
+	});
+
 	it('normalizes fixed password fields before custom fields', () => {
 		const fields = normalizePasswordFields([
 			{ id: 'url', type: 'text', label: '', value: 12 },

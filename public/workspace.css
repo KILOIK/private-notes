@@ -608,6 +608,26 @@
   gap: 0;
 }
 
+.note-password-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--workspace-divider);
+}
+
+.note-password-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.note-password-input-row .password-visibility-toggle {
+  width: 44px;
+  height: 44px;
+}
+
 .password-reader-field {
   display: grid;
   grid-template-columns: minmax(96px, 150px) minmax(0, 1fr) auto;

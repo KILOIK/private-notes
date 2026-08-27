@@ -1,5 +1,5 @@
 /**
- * @typedef {{ id: string, title?: string, created_at: number, updated_at: number, record?: any, folderName?: string }} WorkspaceNote
+ * @typedef {{ id: string, title?: string, content?: string, created_at: number, updated_at: number, record?: any, folderName?: string, decryptFailed?: boolean }} WorkspaceNote
  * @typedef {{ id: string, name: string }} WorkspaceFolder
  * @typedef {'updated' | 'created' | 'title'} NoteSortKey
  */
@@ -61,6 +61,17 @@ export function sortVisibleNotes(notes, sortKey) {
     }
     const field = sortKey === 'created' ? 'created_at' : 'updated_at';
     return (Number(b[field]) || 0) - (Number(a[field]) || 0) || a.id.localeCompare(b.id);
+  });
+}
+
+/** @template {WorkspaceNote} T @param {T[]} notes @param {string} query @returns {T[]} */
+export function filterNotesByQuery(notes, query) {
+  const q = String(query || '').trim().toLocaleLowerCase('zh-CN');
+  if (!q) return notes;
+  return notes.filter(function (note) {
+    if (note.decryptFailed) return true;
+    return String(note.title || '').toLocaleLowerCase('zh-CN').includes(q)
+      || String(note.content || '').toLocaleLowerCase('zh-CN').includes(q);
   });
 }
 

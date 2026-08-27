@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:workers';
 import { createDefaultPasswordFields } from '../public/password-fields.js';
 import { decodeNoteRecord } from '../public/note-records.js';
-import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from '../public/password-ui.js';
+import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader, renderSecretReader } from '../public/password-ui.js';
 
 class TestElement {
 	children: TestElement[] = [];
@@ -163,6 +163,19 @@ describe('password editor and reader behavior', () => {
 			expect(secret?.textContent).toBe('not-logged-secret');
 			expect(clipboard.writeText).toHaveBeenCalledTimes(1);
 			expect(controls.some((element) => element.className.includes('password-field-copy'))).toBe(false);
+		} finally {
+			restore();
+		}
+	});
+
+	it('renders a note password with the masked reader control', () => {
+		const restore = installDocument();
+		try {
+			const container = new TestElement();
+			renderSecretReader(container, 'note-secret', '密码', { writeText: vi.fn().mockResolvedValue(undefined) }, vi.fn());
+			const value = descendants(container).find((element) => element.className.includes('password-reader-value'));
+			expect(value?.textContent).toBe('•'.repeat('note-secret'.length));
+			expect(descendants(container).some((element) => element.className.includes('password-visibility-toggle'))).toBe(true);
 		} finally {
 			restore();
 		}

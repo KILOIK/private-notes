@@ -63,7 +63,14 @@ export function decodeNoteRecord(content) {
   requireVersion(parsed);
   if (parsed.type === 'note') {
     if (typeof parsed.markdown !== 'string') throw new Error('invalid note markdown');
-    return immutable({ v: 1, type: 'note', folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null, markdown: parsed.markdown });
+    const password = typeof parsed.password === 'string' ? parsed.password : '';
+    return immutable({
+      v: 1,
+      type: 'note',
+      folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null,
+      markdown: parsed.markdown,
+      ...(password ? { password } : {}),
+    });
   }
   if (parsed.type === 'password') {
     const fields = normalizePasswordFields(parsed.fields);
@@ -77,12 +84,19 @@ export function decodeNoteRecord(content) {
 /** @param {any} record */
 export function encodeNoteRecord(record) {
   if (!record || typeof record !== 'object' || record.type !== 'note' || typeof record.markdown !== 'string') throw new Error('invalid note record');
-  return JSON.stringify({ v: 1, type: 'note', folderId: typeof record.folderId === 'string' ? record.folderId : null, markdown: record.markdown });
+  const password = typeof record.password === 'string' ? record.password : '';
+  return JSON.stringify({
+    v: 1,
+    type: 'note',
+    folderId: typeof record.folderId === 'string' ? record.folderId : null,
+    markdown: record.markdown,
+    ...(password ? { password } : {}),
+  });
 }
 
-/** @param {string} markdown @param {string | null} folderId */
-export function buildNoteSaveContent(markdown, folderId) {
-  return encodeNoteRecord({ type: 'note', folderId: folderId, markdown: markdown });
+/** @param {string} markdown @param {string | null} folderId @param {string} [password] */
+export function buildNoteSaveContent(markdown, folderId, password = '') {
+  return encodeNoteRecord({ type: 'note', folderId: folderId, markdown: markdown, password: password });
 }
 
 /** @param {any} record */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNavigationModel, buildPasswordDisplayModel, getSortOptions, sortVisibleNotes } from '../public/workspace-model.js';
+import { buildNavigationModel, buildPasswordDisplayModel, filterNotesByQuery, getSortOptions, sortVisibleNotes } from '../public/workspace-model.js';
 
 const folders = [
 	{ id: 'work', name: '工作' },
@@ -13,6 +13,14 @@ const notes = [
 ];
 
 describe('PDF workspace model', () => {
+	it('searches every folder and record type when a query is present', () => {
+		const searchable = [
+			{ id: 'uncategorized', title: 'Alpha', content: 'secret text', created_at: 1, updated_at: 1, record: { type: 'note', folderId: null } },
+			{ id: 'work', title: 'Beta', content: 'other', created_at: 1, updated_at: 1, record: { type: 'password', folderId: 'work' } },
+		];
+		expect(filterNotesByQuery(searchable, 'secret').map((note) => note.id)).toEqual(['uncategorized']);
+		expect(filterNotesByQuery(searchable, 'BETA').map((note) => note.id)).toEqual(['work']);
+	});
 	it('groups total, note, and password counts under every folder', () => {
 		const model = buildNavigationModel(notes, folders, 'password', 'work', 2);
 		expect(model.totalCount).toBe(3);

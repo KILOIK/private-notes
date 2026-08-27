@@ -1,5 +1,5 @@
 /**
- * @param {{ recordType?: string, title?: unknown, folderId?: unknown, fields?: Array<{ id?: unknown, type?: unknown, label?: unknown, value?: unknown }>, markdown?: unknown, pendingCount?: unknown }} draft
+ * @param {{ recordType?: string, title?: unknown, folderId?: unknown, fields?: Array<{ id?: unknown, type?: unknown, label?: unknown, value?: unknown }>, markdown?: unknown, notePassword?: unknown, pendingCount?: unknown }} draft
  * @returns {string}
  */
 export function createComposerDraftSnapshot(draft) {
@@ -16,6 +16,7 @@ export function createComposerDraftSnapshot(draft) {
       };
     }) : [],
     markdown: String(draft.markdown || ''),
+    notePassword: String(draft.notePassword || ''),
     pendingCount: Math.max(0, Number(draft.pendingCount) || 0),
   });
 }

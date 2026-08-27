@@ -6,7 +6,7 @@ import { addPendingImage, clearAttachmentDraft, createAttachmentDraft, replacePe
 import { buildComposerFolderChoices, matchesNoteFilter, resolveFolderName, sortFolders } from './folder-model.js';
 import { buildNoteSaveContent, decodeNoteRecord, getSafeRecordText } from './note-records.js';
 import { createDefaultPasswordFields } from './password-fields.js';
-import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader } from './password-ui.js';
+import { buildPasswordSavePayload, focusComposerPrimaryField, renderPasswordEditor, renderPasswordReader, renderSecretReader } from './password-ui.js';
 import { createLatestOperation } from './latest-operation.js';
 import { clearDecryptedFolderState, clearDecryptedNoteState, clearSessionAuthState } from './vault-ui-state.js';
 import { beginComposerSaving } from './composer-saving.js';
@@ -14,7 +14,7 @@ import { createComposerDraftSnapshot } from './composer-draft.js';
 import { completeComposerSave } from './composer-post-save.js';
 import { createComposerSaveRecovery, getComposerRetryNote, getUncommittedAttachmentIds, markComposerSaveCommitted, updateComposerSaveRecovery } from './composer-recovery.js';
 import { getReaderActionModel, getWorkspaceMode, getWorkspacePresentation, getWorkspaceScrollTarget } from './workspace-view.js';
-import { buildNavigationModel, sortVisibleNotes } from './workspace-model.js';
+import { buildNavigationModel, filterNotesByQuery, sortVisibleNotes } from './workspace-model.js';
 import { getTrashReaderActionModel, getTrashRowMeta } from './trash-ui-state.js';
 import { getSettingsSurfaceState } from './settings-ui-state.js';
 import { applyTotpInput, getCompleteTotpCode, moveTotpFocus, normalizeTotpInput } from './totp-input.js';
@@ -75,6 +75,7 @@ const KEY_CHECK_MARKER = 'private-notes-key-check:v1';
  * sortKey: 'updated' | 'created' | 'title'
  * editorRecordType: 'note' | 'password'
  * editorPasswordFields: Array<{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }>
+ * editorNotePassword: string
  * editorFolderId: string | null
  * editorSourceMarkdown: string
  * editorSourceDirty: boolean
@@ -142,6 +143,7 @@ const state = {
   sortKey: 'updated',
   editorRecordType: 'note',
   editorPasswordFields: [],
+  editorNotePassword: '',
   editorFolderId: null,
   editorSourceMarkdown: '',
   editorSourceDirty: false,
@@ -286,6 +288,10 @@ const els = {
   readerDocument: getElement('readerDocument'),
   readerEditor: getElement('readerEditor'),
   passwordFields: getElement('passwordFields'),
+  notePasswordEditor: getElement('notePasswordEditor'),
+  notePasswordInput: getInput('notePasswordInput'),
+  notePasswordToggleBtn: getButton('notePasswordToggleBtn'),
+  notePasswordClearBtn: getButton('notePasswordClearBtn'),
   readerMoreMenu: getElement('readerMoreMenu'),
   readerDeleteBtn: getButton('readerDeleteBtn'),
   editorModal: getElement('editorModal'),
@@ -1113,7 +1119,7 @@ async function encryptValue(value) {
  * @param {Note} note
  */
 async function encryptShare(note) {
-  const content = getSafeRecordText(note.record, note.content);
+  const content = getSafeRecordText(note.record || decodeNoteRecord(note.content), note.content);
   if (content === null) throw new Error('密码记录不能分享');
   const attachments = await collectShareAttachments(note);
   return encryptSharedPayload({
@@ -1276,25 +1282,12 @@ async function refreshFolders() {
   applySearch();
 }
 
-/**
- * Search is memory-only: keystrokes never trigger API requests or repeat
- * decryption work.
- * @param {Note[]} notes
- * @param {string} query
- */
-function filterNotes(notes, query) {
-  const q = (query || '').trim().toLocaleLowerCase('zh-CN');
-  if (!q) return notes;
-  return notes.filter(function (note) {
-    if (note.decryptFailed) return true;
-    return (note.title || '').toLocaleLowerCase('zh-CN').includes(q)
-      || (note.content || '').toLocaleLowerCase('zh-CN').includes(q);
-  });
-}
-
 function applySearch() {
   const source = state.trashMode ? state.trashNotes : state.allNotes;
-  state.notes = filterNotes(source, els.searchInput.value).filter(function (note) {
+  const query = els.searchInput.value;
+  const hasQuery = Boolean(query.trim());
+  state.notes = filterNotesByQuery(source, query).filter(function (note) {
+    if (hasQuery) return true;
     return state.trashMode
       ? matchesNoteFilter(note, state.activeCategory, undefined, state.folderMap)
       : matchesNoteFilter(note, state.activeCategory, state.activeFolderId, state.folderMap);
@@ -1490,7 +1483,7 @@ function renderList() {
   els.noteList.innerHTML = '';
   const folderName = typeof state.activeFolderId === 'string' ? state.folderMap.get(state.activeFolderId)?.name || '未分类' : '未分类';
   const categoryLabel = state.activeCategory === 'note' ? ' · 笔记' : state.activeCategory === 'password' ? ' · 密码' : '';
-  els.listTitle.textContent = state.trashMode ? '最近删除' : folderName + categoryLabel;
+  els.listTitle.textContent = state.trashMode ? '最近删除' : els.searchInput.value.trim() ? '搜索结果' : folderName + categoryLabel;
   els.noteCount.textContent = state.notes.length ? ('共 ' + state.notes.length + ' 条') : '0 条';
   if (!state.trashMode && state.decryptFailedCount > 0) {
     els.noteCount.textContent += ' · ' + state.decryptFailedCount + ' 条无法解密';
@@ -1636,6 +1629,7 @@ function updateComposerRecordType(recordType) {
   els.editorTitle.classList.remove('hidden');
   els.editorCard.classList.toggle('is-document-composer', !password);
   els.passwordEditorFields.classList.toggle('hidden', !password);
+  els.notePasswordEditor.classList.toggle('hidden', password);
   els.editorContent.classList.add('hidden');
   els.documentEditor.classList.toggle('hidden', password);
   els.editorPreview.classList.add('hidden');
@@ -1659,6 +1653,7 @@ function getComposerSnapshot() {
     folderId: state.editorFolderId,
     fields: state.editorPasswordFields,
     markdown: state.editorRecordType === 'password' ? '' : getEditorSourceMarkdown(),
+    notePassword: state.editorRecordType === 'password' ? '' : els.notePasswordInput.value,
     pendingCount: state.attachmentDraft.images.length,
   });
 }
@@ -1712,8 +1707,13 @@ function openComposer(note) {
   state.editorPasswordFields = recordType === 'password' && Array.isArray(record?.fields)
     ? record.fields.map(function (/** @type {{ id: string, type: 'text' | 'secret' | 'multiline', label: string, value: string }} */ field) { return { ...field }; })
     : createDefaultPasswordFields();
+  state.editorNotePassword = recordType === 'note' && typeof record?.password === 'string' ? record.password : '';
   els.modalTitle.textContent = note ? (recordType === 'password' ? '编辑密码' : '编辑笔记') : (recordType === 'password' ? '新建密码' : '新建笔记');
   els.editorTitle.value = note ? String(note.title || record?.title || '') : '';
+  els.notePasswordInput.value = state.editorNotePassword;
+  els.notePasswordInput.type = 'password';
+  els.notePasswordToggleBtn.setAttribute('aria-label', '显示密码');
+  els.notePasswordToggleBtn.setAttribute('title', '显示密码');
   const markdown = recordType === 'note' && record?.type === 'note' ? record.markdown : '';
   state.editorSourceMarkdown = markdown;
   state.editorSourceDirty = false;
@@ -1765,6 +1765,7 @@ function closeComposer(discardDraft = true) {
   state.editingId = null;
   state.composerPostSaveRecovery = null;
   state.editorPasswordFields = [];
+  state.editorNotePassword = '';
   state.editorFolderId = null;
   state.editorSourceMarkdown = '';
   state.editorSourceDirty = false;
@@ -1883,6 +1884,10 @@ async function openReader(noteId) {
   }
   if (!state.readerOperation.isCurrent(operationId) || state.readerNoteId !== noteId || state.vaultKey !== vaultKey) return;
   els.readerContent.append(renderMarkdown(plan.markdown, attachmentMap));
+  if (typeof record.password === 'string' && record.password) {
+    els.passwordFields.classList.remove('hidden');
+    renderSecretReader(els.passwordFields, record.password, '密码', navigator.clipboard, setStatus);
+  }
 }
 
 function closeReader() {
@@ -1924,7 +1929,7 @@ function getCurrentReaderNote() {
 async function copyCurrentReaderNote() {
   const note = getCurrentReaderNote();
   if (!note || note.decryptFailed) throw new Error('找不到可复制的笔记');
-  const text = getSafeRecordText(note.record, note.content);
+  const text = getSafeRecordText(note.record || decodeNoteRecord(note.content), note.content);
   if (text === null) throw new Error('密码记录请逐字段复制');
   await navigator.clipboard.writeText(text);
   setStatus('已复制：' + (note.title || '无标题'));
@@ -2018,7 +2023,8 @@ async function saveComposer() {
       markdown = replacePendingToken(markdown, image.token, image.attachmentId);
     }
   }
-  if (!rawTitle && !markdown) throw new Error('标题和内容至少写一个');
+  const notePassword = password ? '' : els.notePasswordInput.value;
+  if (!rawTitle && !markdown && !notePassword) throw new Error('标题、内容和密码至少写一个');
   if (!state.vaultUnlocked || !state.vaultKey) {
     throw new Error('请先输入本地解锁密钥');
   }
@@ -2028,7 +2034,7 @@ async function saveComposer() {
 
   setStatus('保存中…');
 
-  const content = passwordPayload ? passwordPayload.content : buildNoteSaveContent(markdown, state.editorFolderId);
+  const content = passwordPayload ? passwordPayload.content : buildNoteSaveContent(markdown, state.editorFolderId, notePassword);
   const encryptedTitle = await encryptValue(title);
   const encryptedContent = await encryptValue(content);
   const attachmentIds = password ? [] : extractAttachmentIds(markdown);
@@ -2734,7 +2740,7 @@ els.readerShareBtn.onclick = function () {
     setStatus('找不到可分享的笔记');
     return;
   }
-  if (getSafeRecordText(note.record, note.content) === null) {
+  if (getSafeRecordText(note.record || decodeNoteRecord(note.content), note.content) === null) {
     setStatus('密码记录不支持分享');
     return;
   }
@@ -2769,6 +2775,19 @@ els.readerPermanentDeleteBtn.onclick = function () {
 };
 els.editorFolder.onchange = function () {
   state.editorFolderId = els.editorFolder.value || null;
+};
+els.notePasswordInput.addEventListener('input', function () {
+  state.editorNotePassword = els.notePasswordInput.value;
+});
+els.notePasswordToggleBtn.onclick = function () {
+  const hidden = els.notePasswordInput.type === 'password';
+  els.notePasswordInput.type = hidden ? 'text' : 'password';
+  els.notePasswordToggleBtn.setAttribute('aria-label', hidden ? '隐藏密码' : '显示密码');
+  els.notePasswordToggleBtn.setAttribute('title', hidden ? '隐藏密码' : '显示密码');
+};
+els.notePasswordClearBtn.onclick = function () {
+  els.notePasswordInput.value = '';
+  state.editorNotePassword = '';
 };
 els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { setStatus(error.message || '绑定失败'); }); };
 els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };

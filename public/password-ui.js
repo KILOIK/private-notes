@@ -159,3 +159,19 @@ export function renderPasswordReader(container, record, clipboard, onStatus) {
     container.append(wrapper);
   });
 }
+
+/**
+ * Renders a single optional secret using the same masked/copyable control as
+ * password records.
+ * @param {HTMLElement} container
+ * @param {string} value
+ * @param {string} label
+ * @param {{ writeText(value: string): Promise<void> }} clipboard
+ * @param {(status: string) => void} onStatus
+ */
+export function renderSecretReader(container, value, label, clipboard, onStatus) {
+  renderPasswordReader(container, {
+    type: 'password',
+    fields: [{ id: 'secret', type: 'secret', label: label, value: value }]
+  }, clipboard, onStatus);
+}
