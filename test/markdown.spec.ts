@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import {
 	buildHighlightedTextSegments,
 	buildReaderRenderPlan,
@@ -21,6 +21,7 @@ class MarkdownTestNode {
 	loading = '';
 	className = '';
 	attributes = new Map<string, string>();
+	onclick: (() => void) | null = null;
 
 	constructor(tagName = '') {
 		this.tagName = tagName.toUpperCase();
@@ -171,16 +172,36 @@ it('does not parse underscores inside words as emphasis', () => {
 	}
 });
 
-it('renders password blocks inside the document with a masked input', () => {
+	it('renders password blocks inside the document with a masked copy area', () => {
 	const restore = installMarkdownDocument();
 	try {
 		const fragment = renderMarkdown('正文前\n\n:::password\nsecret\n:::\n\n正文后') as unknown as MarkdownTestNode;
-		expect(flattenTags(fragment)).toContain('INPUT');
+		expect(flattenTags(fragment)).toContain('BUTTON');
 		const block = findByAttribute(fragment, 'data-password-block', 'true');
 		expect(block).not.toBeNull();
 		const input = block!.childNodes[1];
-		expect(input.getAttribute('type')).toBe('password');
-		expect(input.getAttribute('value')).toBe('secret');
+		expect(input.textContent).toBe('*****');
+	} finally {
+		restore();
+	}
+});
+
+it('renders a masked password block that copies on value click and reveals on eye click', async () => {
+	const restore = installMarkdownDocument();
+	const writeText = vi.fn().mockResolvedValue(undefined);
+	try {
+		const runtime = globalThis as unknown as { navigator?: unknown };
+		runtime.navigator = { clipboard: { writeText } };
+		const fragment = renderMarkdown(':::password\nsecret\n:::') as unknown as MarkdownTestNode;
+		const block = findByAttribute(fragment, 'data-password-block', 'true')!;
+		const value = block.childNodes[1];
+		const eye = block.childNodes[2];
+		expect(value.textContent).toBe('*****');
+		value.onclick?.();
+		await Promise.resolve();
+		expect(writeText).toHaveBeenCalledWith('secret');
+		eye.onclick?.();
+		expect(value.textContent).toBe('secret');
 	} finally {
 		restore();
 	}

@@ -2838,6 +2838,9 @@ els.insertPasswordBlockBtn.onclick = function () {
   const input = block.querySelector('.password-block-input');
   if (input instanceof HTMLInputElement) input.focus();
 };
+els.insertPasswordBlockBtn.addEventListener('mousedown', function (event) {
+  event.preventDefault();
+});
 els.enrollTotpBtn.onclick = function () { enrollTotp().catch(function (error) { setStatus(error.message || '绑定失败'); }); };
 els.confirmTotpBtn.onclick = function () { confirmTotpEnrollment().catch(function (error) { setStatus(error.message || '验证失败'); }); };
 els.disableTotpBtn.onclick = function () { disableTotp().catch(function (error) { setStatus(error.message || '关闭失败'); }); };

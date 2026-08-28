@@ -202,12 +202,16 @@ export function loadEditorMarkdown(editor, markdown, attachments = new Map(), pe
 
 /** @param {HTMLElement} editor @param {string} [value] */
 export function insertPasswordBlock(editor, value = '') {
-  const block = createPasswordBlockElement(value, true);
   const selection = typeof window !== 'undefined' && typeof window.getSelection === 'function' ? window.getSelection() : null;
   const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+  const selectedValue = range && typeof range.toString === 'function' ? range.toString() : '';
+  const block = createPasswordBlockElement(selectedValue || value, true);
   if (selection && range && editor.contains(range.commonAncestorContainer)) {
     range.deleteContents();
-    range.insertNode(block);
+    let anchor = range.startContainer;
+    while (anchor && anchor.parentNode && anchor.parentNode !== editor) anchor = anchor.parentNode;
+    if (anchor && anchor.parentNode === editor) anchor.parentNode.insertBefore(block, anchor.nextSibling);
+    else editor.append(block);
     range.setStartAfter(block);
     range.collapse(true);
     selection.removeAllRanges();

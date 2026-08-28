@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loadEditorMarkdown, runEditorCommand, serializeEditorMarkdown } from '../public/document-editor.js';
+import { insertPasswordBlock, loadEditorMarkdown, runEditorCommand, serializeEditorMarkdown } from '../public/document-editor.js';
 
 class EditorNode {
 	tagName = '';
@@ -8,6 +8,7 @@ class EditorNode {
 	textContent = '';
 	className = '';
 	attributes = new Map<string, string>();
+	parentNode: EditorNode | null = null;
 	ownerDocument: { execCommand?: ReturnType<typeof vi.fn> } | null = null;
 
 	constructor(tagName = '', text = '') {
@@ -18,9 +19,17 @@ class EditorNode {
 
 	append(...children: EditorNode[]) {
 		children.forEach((child) => {
+			child.parentNode = this;
 			if (!child.tagName && child.childNodes.length) this.childNodes.push(...child.childNodes);
 			else this.childNodes.push(child);
 		});
+	}
+
+	insertBefore(child: EditorNode, reference: EditorNode | null) {
+		child.parentNode = this;
+		const index = reference ? this.childNodes.indexOf(reference) : -1;
+		if (index < 0) this.childNodes.push(child);
+		else this.childNodes.splice(index, 0, child);
 	}
 
 	replaceChildren(...children: EditorNode[]) {
@@ -37,6 +46,10 @@ class EditorNode {
 
 	removeAttribute(name: string) {
 		this.attributes.delete(name);
+	}
+
+	contains(node: EditorNode): boolean {
+		return node === this || this.childNodes.includes(node) || this.childNodes.some((child) => child.contains(node));
 	}
 
 	focus() {}
@@ -139,6 +152,37 @@ describe('controlled Markdown document editor', () => {
 		const editor = new EditorNode('div');
 		editor.append(element('p', [text('正文前')]), passwordBlock, element('p', [text('正文后')]));
 		expect(serializeEditorMarkdown(editor as never)).toBe('正文前\n\n:::password\nsecret\n:::\n\n正文后');
+	});
+
+	it('moves selected editor text into a password block', () => {
+		const editor = new EditorNode('div');
+		const paragraph = element('p', [text('需要隐藏')]);
+		editor.append(paragraph);
+		const inserted: EditorNode[] = [];
+		const range = {
+			commonAncestorContainer: paragraph,
+			startContainer: paragraph,
+			toString: () => '需要隐藏',
+			deleteContents: vi.fn(() => { paragraph.childNodes = []; }),
+			insertNode: vi.fn((node: EditorNode) => { inserted.push(node); }),
+			setStartAfter: vi.fn(),
+			collapse: vi.fn(),
+		};
+		const selection = {
+			rangeCount: 1,
+			getRangeAt: () => range,
+			removeAllRanges: vi.fn(),
+			addRange: vi.fn(),
+		};
+		const { documentStub } = createEditorDocument();
+		withDocument(documentStub, () => {
+			(globalThis as unknown as { window: { getSelection: () => typeof selection } }).window.getSelection = () => selection;
+			const block = insertPasswordBlock(editor as never);
+			expect(inserted).toHaveLength(0);
+			expect(block.childNodes[1].value).toBe('需要隐藏');
+			expect(range.deleteContents).toHaveBeenCalled();
+			expect(editor.childNodes).toEqual([paragraph, block]);
+		});
 	});
 
 	it('preserves a literal backslash in a text node when serializing', () => {

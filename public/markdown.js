@@ -82,26 +82,41 @@ export function createPasswordBlockElement(value = '', editable = false) {
   block.className = 'markdown-password-block';
   block.setAttribute('data-password-block', 'true');
   block.setAttribute('contenteditable', 'false');
+  const secret = String(value || '');
   const label = document.createElement('span');
   label.className = 'password-block-label';
   label.textContent = '密码块';
-  const input = document.createElement('input');
-  input.className = 'input password-block-input';
-  input.type = 'password';
-  input.value = String(value || '');
-  input.autocomplete = 'new-password';
-  input.readOnly = !editable;
-  input.setAttribute('type', 'password');
-  input.setAttribute('value', input.value);
-  input.setAttribute('aria-label', '密码块内容');
+  const input = editable ? document.createElement('input') : document.createElement('button');
+  input.className = editable ? 'input password-block-input' : 'password-block-value';
+  input.type = editable ? 'password' : 'button';
+  if (editable) {
+    const editableInput = /** @type {HTMLInputElement} */ (input);
+    editableInput.value = secret;
+    editableInput.autocomplete = 'new-password';
+    editableInput.readOnly = false;
+    editableInput.setAttribute('type', 'password');
+    editableInput.setAttribute('value', editableInput.value);
+    editableInput.setAttribute('aria-label', '密码块内容');
+  } else {
+    input.textContent = '*****';
+    input.setAttribute('aria-label', '复制密码块');
+    input.setAttribute('title', '点击复制密码块');
+    input.onclick = function () {
+      const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : null;
+      if (clipboard && typeof clipboard.writeText === 'function') {
+        Promise.resolve(clipboard.writeText(secret)).catch(function () {});
+      }
+    };
+  }
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'icon-btn password-visibility-toggle';
   toggle.setAttribute('aria-label', '显示密码块');
   toggle.setAttribute('title', '显示密码块');
   toggle.onclick = function () {
-    const hidden = input.type === 'password';
-    input.type = hidden ? 'text' : 'password';
+    const hidden = editable ? input.type === 'password' : input.textContent === '*****';
+    if (editable) input.type = hidden ? 'text' : 'password';
+    else input.textContent = hidden ? secret : '*****';
     toggle.setAttribute('aria-label', hidden ? '隐藏密码块' : '显示密码块');
     toggle.setAttribute('title', hidden ? '隐藏密码块' : '显示密码块');
   };
